@@ -697,9 +697,14 @@
       { osis: "Rev",  names: ["Apocalipse", "Revelation", null], ch: 22 },
     ];
 
-    function bibleLang() {
-      return state.bible.hebrew ? state.bible.version : state.bible.version;
-    }
+    const VERSION_LANG = {
+      "almeida-livre": "pt",
+      "kjv": "en",
+      "web": "en",
+      "asv": "en",
+      "wlc": "he",
+      "aleppo": "he",
+    };
     function activeBibleSlug() {
       return state.bible.version; // almeida-livre | kjv | web | asv
     }
@@ -707,6 +712,10 @@
       return state.bible.hebrew;
     }
     function hebrewSlug() { return "wlc"; }
+    function activeLang() {
+      const slug = isHebrew() ? hebrewSlug() : activeBibleSlug();
+      return VERSION_LANG[slug] || "pt";
+    }
 
     let bibleCache = {};
     let bibleBooks = null; // lista de livros para o current version
@@ -739,9 +748,10 @@
     }
 
     async function loadBookJson(slug, osis) {
+      const lang = VERSION_LANG[slug] || "pt";
       const key = slug + "/" + osis;
       if (bibleCache[key]) return bibleCache[key];
-      const res = await fetch("data/biblia/" + slug + "/books/" + osis + ".json");
+      const res = await fetch("data/biblia/" + lang + "/" + slug + "/books/" + osis + ".json");
       if (!res.ok) throw new Error("Livro não encontrado: " + osis);
       const data = await res.json();
       bibleCache[key] = data;

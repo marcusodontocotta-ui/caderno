@@ -101,7 +101,7 @@
         <button id="btnAlignRight" title="Alinhar à direita" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡→</button>
         <button id="btnAlignJustify" title="Justificar" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡⇔</button>
         <span class="w-px h-5 bg-gray-300 mx-1"></span>
-        <label title="Inserir imagem no cursor" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 cursor-pointer">🖼 Imagem
+        <label id="imgLabel" title="Inserir imagem no cursor" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 cursor-pointer">🖼 Imagem
           <input id="imgInput" type="file" accept="image/*,.xlsx,.xls,.csv" class="hidden" />
         </label>
         <button id="btnImgSize" title="Redimensionar a imagem selecionada" class="text-xs px-2 py-1 rounded border border-blue-400 bg-blue-50 text-blue-700 hover:bg-blue-100 hidden">↔ Tamanho</button>
@@ -752,6 +752,45 @@
     $("btnAlignJustify").addEventListener("click", () => execAlign("justifyFull"));
 
     // Inserir imagem ou planilha no cursor do editor
+    let plantedMarker = null;
+    // Ao clicar no botão 🖼, planta um marcador na posição do cursor
+    // (enquanto o editor ainda está focado), para depois substituí-lo.
+    function plantMarker() {
+      if (document.activeElement === editor || editor.contains(document.activeElement)) {
+        editor.focus();
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && editor.contains(sel.rangeCount && sel.getRangeAt(0).startContainer)) {
+          document.execCommand("insertHTML", false, '<span id="__imgholder__" data-marker="1"></span>');
+        }
+      }
+      plantedMarker = editor.querySelector("#__imgholder__");
+    }
+    $("imgLabel").addEventListener("mousedown", (e) => {
+      plantMarker();
+    });
+
+    function placeInserted(html) {
+      const holder = plantedMarker || editor.querySelector("#__imgholder__");
+      if (holder) {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = html;
+        const node = wrap.firstChild;
+        holder.parentNode.replaceChild(node, holder);
+        plantedMarker = null;
+        // cursor depois do nó
+        const sel = window.getSelection();
+        const after = document.createRange();
+        after.setStartAfter(node);
+        after.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(after);
+        page().text = editor.innerHTML;
+        saveState();
+      } else {
+        restoreAndInsert(html);
+      }
+    }
+
     $("imgInput").addEventListener("change", (e) => {
       const f = e.target.files[0];
       e.target.value = "";
@@ -760,7 +799,7 @@
       if (isImage) {
         const reader = new FileReader();
         reader.onload = (ev) => {
-          restoreAndInsert('<img src="' + ev.target.result + '" alt="imagem" />');
+          placeInserted('<img src="' + ev.target.result + '" alt="imagem" />');
         };
         reader.readAsDataURL(f);
       } else {
@@ -779,7 +818,7 @@
             html += "</tr>";
           });
           html += "</table>";
-          restoreAndInsert(html);
+          placeInserted(html);
         };
         reader.readAsText(f);
       }

@@ -27,7 +27,8 @@
     #drawer { transition: transform 0.25s ease; }
     #drawer.open { transform: translateX(0); }
     #drawerBackdrop { transition: opacity 0.2s ease; }
-    #editor img { max-width: 100%; height: auto; border-radius: 6px; margin: 4px 0; }
+    #editor img { display: inline-block; max-width: 100%; height: auto; border-radius: 6px; margin: 4px; vertical-align: middle; cursor: pointer; }
+    #editor img.selected { outline: 3px solid #3b82f6; outline-offset: 2px; }
     #editor table { border-collapse: collapse; margin: 6px 0; }
     #editor table td, #editor table th { border: 1px solid #d1d5db; padding: 4px 8px; }
   </style>
@@ -101,8 +102,9 @@
         <button id="btnAlignJustify" title="Justificar" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡⇔</button>
         <span class="w-px h-5 bg-gray-300 mx-1"></span>
         <label title="Inserir imagem no cursor" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 cursor-pointer">🖼 Imagem
-          <input id="imgInput" type="file" accept="image/*" class="hidden" />
+          <input id="imgInput" type="file" accept="image/*,.xlsx,.xls,.csv" class="hidden" />
         </label>
+        <button id="btnImgSize" title="Redimensionar a imagem selecionada" class="hidden text-xs px-2 py-1 rounded border border-blue-400 bg-blue-50 text-blue-700 hover:bg-blue-100">↔ Tamanho</button>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
       </div>
       <div class="shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
@@ -301,6 +303,7 @@
     const drawerBackdrop = $("drawerBackdrop");
     const notebookList = $("notebookList");
     const pageTabs = $("pageTabs");
+    const btnImgSize = $("btnImgSize");
 
     const ctx = drawingCanvas.getContext("2d");
 
@@ -690,19 +693,94 @@
     $("btnAlignRight").addEventListener("click", () => execAlign("justifyRight"));
     $("btnAlignJustify").addEventListener("click", () => execAlign("justifyFull"));
 
-    // Inserir imagem no cursor do editor
+    // Inserir imagem ou planilha no cursor do editor
     $("imgInput").addEventListener("change", (e) => {
       const f = e.target.files[0];
       e.target.value = "";
       if (!f) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
+      const isImage = f.type && f.type.indexOf("image") === 0;
+      if (isImage) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          editor.focus();
+          document.execCommand("insertHTML", false, '<img src="' + ev.target.result + '" alt="imagem" />');
+          page().text = editor.innerHTML;
+          saveState();
+        };
+        reader.readAsDataURL(f);
+      } else {
+        // planilha: inserir como tabela simples (melhor assim do que tentar renderizar o binário)
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const text = String(ev.target.result || "").trim();
+          const rows = text.split(/\r?\n/).map((r) => r.split("\t"));
+          let html = "<table>";
+          rows.forEach(function (row, i) {
+            html += "<tr>";
+            row.forEach(function (cell) {
+              const cellText = cell.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              html += (i === 0 ? "<th>" : "<td>") + cellText + (i === 0 ? "</th>" : "</td>");
+            });
+            html += "</tr>";
+          });
+          html += "</table>";
+          editor.focus();
+          document.execCommand("insertHTML", false, html);
+          page().text = editor.innerHTML;
+          saveState();
+        };
+        reader.readAsText(f);
+      }
+    });
+
+    // Selecionar imagem clicada dentro do editor
+    let selectedImg = null;
+    editor.addEventListener("click", (e) => {
+      const img = e.target.closest ? e.target.closest("img") : null;
+      if (selectedImg) selectedImg.classList.remove("selected");
+      selectedImg = img;
+      if (selectedImg) {
+        selectedImg.classList.add("selected");
+        btnImgSize.classList.remove("hidden");
         editor.focus();
-        document.execCommand("insertHTML", false, '<img src="' + ev.target.result + '" alt="imagem" />');
-        page().text = editor.innerHTML;
-        saveState();
-      };
-      reader.readAsDataURL(f);
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(selectedImg);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        btnImgSize.classList.add("hidden");
+      }
+    });
+
+    // Redimensionar a imagem selecionada
+    btnImgSize.addEventListener("click", () => {
+      if (!selectedImg) { alert("Clique em uma imagem para selecioná-la e depois redimensione."); return; }
+      const current = selectedImg.style.width || (selectedImg.getBoundingClientRect().width) + "px";
+      const val = prompt("Largura da imagem (px) — ex.: 150, 300, 600:", current.replace("px", ""));
+      if (val === null) return;
+      const w = parseInt(val, 10);
+      if (isNaN(w) || w <= 0) return;
+      selectedImg.style.width = w + "px";
+      selectedImg.style.height = "auto";
+      page().text = editor.innerHTML;
+      saveState();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedImg && window.getSelection().isCollapsed && editor.contains(selectedImg)) {
+          e.preventDefault();
+          selectedImg.remove();
+          selectedImg = null;
+          btnImgSize.classList.add("hidden");
+          page().text = editor.innerHTML;
+          saveState();
+        }
+      }
+      if (e.key === "Escape") {
+        if (selectedImg) { selectedImg.classList.remove("selected"); selectedImg = null; btnImgSize.classList.add("hidden"); }
+      }
     });
 
     // Colar imagem/tabela de planilha dentro do editor

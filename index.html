@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Caderno de Estudos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  </script>
+  <style>
+    .canvas-hidden { display: none !important; }
+    #canvasLayer { touch-action: none; }
+    #pdfLayer, #mediaLayer { pointer-events: none; }
+    #drawingCanvas { cursor: crosshair; }
+    #editor:empty::before {
+      content: attr(data-placeholder);
+      color: #9ca3af;
+      pointer-events: none;
+    }
+    .hebrew-text { direction: rtl; font-family: "SBL Hebrew", "Frank Ruhl Hofshi", "Ezra SIL", "David", "Times New Roman", serif; font-size: 1.4rem; line-height: 2; }
+  </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+  <!-- Topbar -->
+  <header class="bg-white shadow px-4 py-3 flex items-center justify-between border-b border-gray-200 shrink-0 flex-wrap gap-2">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-bold text-gray-800">📓 Caderno de Estudos</h1>
+      <input
+        id="notebookName"
+        type="text"
+        placeholder="Nome do caderno..."
+        class="text-sm text-gray-600 bg-gray-50 border border-gray-300 rounded px-2 py-1 w-48 focus:outline-none focus:ring-2 focus:ring-blue-400"
+      />
+    </div>
+    <div class="flex items-center gap-2 flex-wrap justify-end">
+      <button id="btnLayout" title="Alternar 50/50 ou tela cheia" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded transition">
+        ⛶ Tela cheia
+      </button>
+      <button id="btnNewNotebook" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-1.5 rounded transition">
+        + Novo caderno
+      </button>
+      <button id="btnNewPage" class="text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-1.5 rounded transition">
+        + Nova página
+      </button>
+      <button id="btnPrevPage" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded transition">
+        ‹ Anterior
+      </button>
+      <span id="pageIndicator" class="text-xs text-gray-600 font-medium px-1">1 / 1</span>
+      <button id="btnNextPage" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded transition">
+        Próxima ›
+      </button>
+    </div>
+  </header>
+
+  <!-- Corpo: 50/50 ou tela cheia -->
+  <main id="mainLayout" class="flex-1 flex flex-col md:flex-row overflow-hidden">
+
+    <!-- Editor (esquerda) -->
+    <section id="editorPane" class="flex-1 flex flex-col md:w-1/2 bg-white md:border-r border-gray-200 overflow-hidden">
+      <div class="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-3 flex-wrap">
+        <label class="text-xs font-semibold text-gray-500">Fonte:</label>
+        <input id="fontSize" type="range" min="12" max="32" value="17" class="w-24" />
+        <button id="btnBold" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 font-bold">B</button>
+        <button id="btnItalic" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 italic">I</button>
+        <button id="btnUnderline" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 underline">U</button>
+        <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
+      </div>
+      <div
+        id="editor"
+        contenteditable="true"
+        data-placeholder="Escreva suas anotações de aula aqui..."
+        class="flex-1 w-full p-4 overflow-auto outline-none text-gray-800 leading-relaxed"
+      ></div>
+    </section>
+
+    <!-- Painel direito: Anexos / Bíblia -->
+    <section id="rightPane" class="flex-1 flex flex-col md:w-1/2 bg-gray-50 overflow-hidden">
+      <!-- Abas -->
+      <div class="shrink-0 px-3 pt-2 bg-gray-50 border-b border-gray-200 flex items-center gap-1">
+        <button id="tabAnnex" class="text-xs font-medium px-3 py-1.5 rounded-t border border-b-0">📎 Anexos</button>
+        <button id="tabBible" class="text-xs font-medium px-3 py-1.5 rounded-t border border-b-0">📖 Bíblia</button>
+      </div>
+
+      <!-- ============ ABA ANEXOS ============ -->
+      <div id="annexTab" class="flex-1 flex flex-col overflow-hidden">
+        <!-- Toolbar de anexo -->
+        <div class="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2 flex-wrap">
+          <label class="cursor-pointer text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-100 transition">
+            📎 Anexar arquivo
+            <input id="fileInput" type="file" accept=".pdf,image/*" class="hidden" />
+          </label>
+          <span class="text-xs text-gray-400">ou</span>
+          <button id="btnSnap" class="text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-100 transition">
+            📷 Capturar câmera
+          </button>
+
+          <div class="w-px h-6 bg-gray-300 mx-2"></div>
+
+          <label class="text-xs flex items-center gap-1 text-gray-600">
+            <input id="chkDrawing" type="checkbox" class="accent-blue-600" /> ✏️ Desenhar
+          </label>
+          <input id="penColor" type="color" value="#ef4444" class="w-7 h-7 border border-gray-300 rounded cursor-pointer" title="Cor da caneta" />
+          <input id="penSize" type="range" min="1" max="20" value="4" class="w-20" title="Espessura da caneta" />
+          <button id="btnClearDrawing" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-gray-100">🧽 Limpar desenho</button>
+          <button id="btnDelAttachment" class="text-xs px-2 py-1.5 rounded border border-red-300 text-red-600 hover:bg-red-50">🗑 Remover anexo</button>
+        </div>
+
+        <!-- Area de midia + tela de desenho -->
+        <div id="viewer" class="flex-1 relative overflow-auto bg-[repeating-conic-gradient(#e5e5e5_0%_25%,#ffffff_0%_50%)] bg-[size:16px_16px]">
+          <canvas id="pdfLayer" class="absolute inset-0 m-auto max-w-full max-h-full canvas-hidden"></canvas>
+          <img id="mediaLayer" class="absolute inset-0 m-auto max-w-full max-h-full canvas-hidden object-contain" alt="anexo" />
+          <canvas id="drawingCanvas" class="absolute inset-0 m-auto max-w-full max-h-full"></canvas>
+
+          <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400 text-center p-6">
+            <div class="text-5xl mb-3">🖼️</div>
+            <p class="font-medium">Nenhum anexo nesta página</p>
+            <p class="text-sm mt-1">Anexe um PDF ou foto e desenhe por cima</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ ABA BÍBLIA ============ -->
+      <div id="bibleTab" class="flex-1 flex-col overflow-hidden hidden">
+        <!-- Toolbar Bíblia -->
+        <div class="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2 flex-wrap">
+          <select id="bibleVersion" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5">
+            <option value="almeida-livre">Português — Almeida (Bíblia Livre)</option>
+            <option value="kjv">Inglês — King James (KJV)</option>
+            <option value="web">Inglês — World English (WEB)</option>
+            <option value="asv">Inglês — American Standard (ASV)</option>
+          </select>
+          <label class="text-xs flex items-center gap-1 text-gray-600 ml-1">
+            <input id="chkHebrew" type="checkbox" class="accent-blue-600" /> עברית Hebraico original
+          </label>
+
+          <div class="w-px h-6 bg-gray-300 mx-2"></div>
+
+          <select id="bibleBook" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5 max-w-[10rem]"></select>
+          <select id="bibleChapter" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5"></select>
+          <label class="text-xs flex items-center gap-1 text-gray-600 ml-1">
+            <input id="bibleFontRange" type="range" min="12" max="40" value="17" class="w-20" /> A-
+          </label>
+          <button id="bibleCopy" class="text-xs px-2 py-1.5 ml-auto rounded border border-gray-300 hover:bg-gray-100">📋 Copiar</button>
+        </div>
+
+        <!-- Conteúdo -->
+        <div id="bibleContent" class="flex-1 overflow-auto p-4 bg-white text-gray-800 leading-relaxed"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+    /* =========================================================
+       Estado e persistência (localStorage)
+       ========================================================= */
+    const STORAGE_KEY = "cadernoEstudos.v2";
+
+    let state = {
+      notebooks: [
+        {
+          id: "default",
+          name: "Meu Caderno",
+          pages: [
+            { text: "", attachment: null, drawing: null },
+          ],
+        },
+      ],
+      activeNotebookId: "default",
+      activePageIndex: 0,
+      layout: "split",        // 'split' | 'full'
+      bible: {
+        version: "almeida-livre",
+        hebrew: false,
+        book: "Gen",
+        chapter: 1,
+      },
+      activeTab: "annex",     // 'annex' | 'bible'
+    };
+
+    function defaultPage() {
+      return { text: "", attachment: null, drawing: null };
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) state = JSON.parse(raw);
+        state.layout = state.layout || "split";
+        state.activeTab = state.activeTab || "annex";
+        state.bible = Object.assign({ version: "almeida-livre", hebrew: false, book: "Gen", chapter: 1 }, state.bible);
+        state.notebooks.forEach((n) => n.pages.forEach((p) => { if (p.text === undefined) p.text = ""; }));
+      } catch (e) {
+        console.warn("Falha ao carregar estado", e);
+      }
+    }
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        if (e && (e.name === "QuotaExceededError" || e.code === 22)) {
+          alert("Aviso: os anexos ficaram grandes demais para o armazenamento local (limite ~5MB). Considere exportar ou reduzir o tamanho das imagens.");
+        }
+      }
+    }
+
+    function notebook() {
+      return state.notebooks.find((n) => n.id === state.activeNotebookId) ||
+             state.notebooks[0];
+    }
+    function page() {
+      const n = notebook();
+      if (state.activePageIndex >= n.pages.length) state.activePageIndex = n.pages.length - 1;
+      if (state.activePageIndex < 0) state.activePageIndex = 0;
+      return n.pages[state.activePageIndex];
+    }
+
+    /* =========================================================
+       Referências DOM
+       ========================================================= */
+    const $ = (id) => document.getElementById(id);
+    const editor = $("editor");
+    const notebookName = $("notebookName");
+    const pageIndicator = $("pageIndicator");
+    const mainLayout = $("mainLayout");
+    const editorPane = $("editorPane");
+    const rightPane = $("rightPane");
+    const viewer = $("viewer");
+    const pdfLayer = $("pdfLayer");
+    const mediaLayer = $("mediaLayer");
+    const drawingCanvas = $("drawingCanvas");
+    const emptyState = $("emptyState");
+    const fileInput = $("fileInput");
+    const chkDrawing = $("chkDrawing");
+    const penColor = $("penColor");
+    const penSize = $("penSize");
+
+    const annexTab = $("annexTab");
+    const bibleTab = $("bibleTab");
+    const tabAnnex = $("tabAnnex");
+    const tabBible = $("tabBible");
+    const btnLayout = $("btnLayout");
+
+    const ctx = drawingCanvas.getContext("2d");
+
+    /* =========================================================
+       Layout: 50/50 vs tela cheia
+       ========================================================= */
+    function applyLayout() {
+      if (state.layout === "full") {
+        editorPane.classList.add("hidden");
+        editorPane.classList.remove("md:w-1/2");
+        rightPane.classList.remove("md:w-1/2");
+        rightPane.classList.add("w-full");
+        mainLayout.classList.remove("md:flex-row");
+        mainLayout.classList.add("flex-col");
+        btnLayout.textContent = "⊞ 50/50";
+      } else {
+        editorPane.classList.remove("hidden");
+        editorPane.classList.add("md:w-1/2");
+        rightPane.classList.add("md:w-1/2");
+        rightPane.classList.remove("w-full");
+        mainLayout.classList.add("md:flex-row");
+        mainLayout.classList.remove("flex-col");
+        btnLayout.textContent = "⛶ Tela cheia";
+      }
+      setTimeout(onViewerResize, 50);
+    }
+
+    btnLayout.addEventListener("click", () => {
+      state.layout = state.layout === "split" ? "full" : "split";
+      saveState();
+      applyLayout();
+    });
+
+    /* =========================================================
+       Abas: Anexos / Bíblia
+       ========================================================= */
+    function applyTab() {
+      const isAnnex = state.activeTab === "annex";
+      annexTab.classList.toggle("hidden", !isAnnex);
+      annexTab.classList.toggle("flex", isAnnex);
+      bibleTab.classList.toggle("hidden", isAnnex);
+      bibleTab.classList.toggle("flex", !isAnnex);
+
+      tabAnnex.classList.toggle("bg-white", isAnnex);
+      tabAnnex.classList.toggle("border-gray-300", isAnnex);
+      tabAnnex.classList.toggle("text-blue-700", isAnnex);
+      tabAnnex.classList.toggle("bg-transparent", !isAnnex);
+      tabAnnex.classList.toggle("border-transparent", !isAnnex);
+      tabAnnex.classList.toggle("text-gray-500", !isAnnex);
+
+      tabBible.classList.toggle("bg-white", !isAnnex);
+      tabBible.classList.toggle("border-gray-300", !isAnnex);
+      tabBible.classList.toggle("text-blue-700", !isAnnex);
+      tabBible.classList.toggle("bg-transparent", isAnnex);
+      tabBible.classList.toggle("border-transparent", isAnnex);
+      tabBible.classList.toggle("text-gray-500", isAnnex);
+
+      if (!isAnnex) loadBible();
+    }
+
+    tabAnnex.addEventListener("click", () => { state.activeTab = "annex"; saveState(); applyTab(); });
+    tabBible.addEventListener("click", () => { state.activeTab = "bible"; saveState(); applyTab(); });
+
+    /* =========================================================
+       Render da página ativa (anexos)
+       ========================================================= */
+    function renderUI() {
+      const n = notebook();
+      notebookName.value = n.name;
+      pageIndicator.textContent = (state.activePageIndex + 1) + " / " + n.pages.length;
+      editor.innerHTML = page().text || "";
+
+      const att = page().attachment;
+      pdfLayer.classList.add("canvas-hidden");
+      mediaLayer.classList.add("canvas-hidden");
+      emptyState.style.display = "flex";
+      drawingCanvas.classList.add("canvas-hidden");
+
+      if (att && att.type === "pdf") {
+        renderPdf(att);
+      } else if (att && att.type === "image") {
+        emptyState.style.display = "none";
+        mediaLayer.src = att.dataUrl;
+        mediaLayer.classList.remove("canvas-hidden");
+        showPdfOverlay("image");
+      } else {
+        positionCanvas(0, 0);
+        emptyState.style.display = "flex";
+      }
+    }
+
+    function showPdfOverlay(mode) {
+      if (mode === "image") {
+        fitCanvasToMedia(mediaLayer);
+      }
+      drawingCanvas.classList.remove("canvas-hidden");
+      if (page().drawing) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+          ctx.drawImage(img, 0, 0, drawingCanvas.width, drawingCanvas.height);
+        };
+        img.src = page().drawing;
+      }
+    }
+
+    function positionCanvas(w, h) {
+      const r = viewer.getBoundingClientRect();
+      const maxW = Math.max(r.width * 0.9, 100);
+      const maxH = Math.max(r.height * 0.9, 100);
+      let cw = w, ch = h;
+      if (w > maxW || h > maxH) {
+        const scale = Math.min(maxW / w, maxH / h);
+        cw = w * scale;
+        ch = h * scale;
+      }
+      drawingCanvas.width = cw;
+      drawingCanvas.height = ch;
+      drawingCanvas.style.left = "0";
+      drawingCanvas.style.top = "0";
+    }
+
+    function fitCanvasToMedia(el) {
+      const onLoad = () => {
+        positionCanvas(el.naturalWidth, el.naturalHeight);
+        viewer.dispatchEvent(new Event("resize"));
+      };
+      if (el.complete && el.naturalWidth > 0) {
+        onLoad();
+      } else {
+        el.onload = onLoad;
+      }
+    }
+
+    /* ---- Render PDF via pdf.js ---- */
+    let currentPdfDoc = null;
+    async function renderPdf(att) {
+      try {
+        const pdfDoc = await pdfjsLib.getDocument({ data: base64ToUint8Array(att.dataUrl) }).promise;
+        currentPdfDoc = pdfDoc;
+        att.pageCount = pdfDoc.numPages;
+        if (att.currentPdfPage === undefined) att.currentPdfPage = 1;
+        await drawPdfPage(pdfDoc, att.currentPdfPage);
+      } catch (e) {
+        console.error("Erro ao renderizar PDF", e);
+        alert("Não foi possível renderizar este PDF. Talvez o arquivo esteja corrompido.");
+      }
+    }
+
+    function base64ToUint8Array(dataUrl) {
+      const base64 = dataUrl.split(",")[1];
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    async function drawPdfPage(pdfDoc, pageNo) {
+      const vp = await pdfDoc.getPage(pageNo).then((p) => p.getViewport({ scale: 1 }));
+      const r = viewer.getBoundingClientRect();
+      const maxW = Math.max(r.width * 0.9, 100);
+      const maxH = Math.max(r.height * 0.9, 100);
+      const scale = Math.min(maxW / vp.width, maxH / vp.height, 2);
+
+      const viewport = await pdfDoc.getPage(pageNo).then((p) => p.getViewport({ scale }));
+      const pageObj = await pdfDoc.getPage(pageNo);
+
+      pdfLayer.width = viewport.width;
+      pdfLayer.height = viewport.height;
+      const pctx = pdfLayer.getContext("2d");
+      await pageObj.render({ canvasContext: pctx, viewport }).promise;
+
+      pdfLayer.classList.remove("canvas-hidden");
+      pdfLayer.style.width = viewport.width + "px";
+      pdfLayer.style.height = viewport.height + "px";
+      emptyState.style.display = "none";
+
+      positionCanvas(viewport.width, viewport.height);
+      drawingCanvas.classList.remove("canvas-hidden");
+      if (page().drawing) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+          ctx.drawImage(img, 0, 0, drawingCanvas.width, drawingCanvas.height);
+        };
+        img.src = page().drawing;
+      }
+      saveState();
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (page().attachment && page().attachment.type === "pdf" && currentPdfDoc) {
+        if (e.key === "ArrowRight" && page().attachment.currentPdfPage < currentPdfDoc.numPages) {
+          page().attachment.currentPdfPage++;
+          drawPdfPage(currentPdfDoc, page().attachment.currentPdfPage);
+        } else if (e.key === "ArrowLeft" && page().attachment.currentPdfPage > 1) {
+          page().attachment.currentPdfPage--;
+          drawPdfPage(currentPdfDoc, page().attachment.currentPdfPage);
+        }
+      }
+    });
+
+    /* =========================================================
+       Desenho (sobreposição)
+       ========================================================= */
+    let drawing = false;
+    let lastPt = null;
+
+    drawingCanvas.addEventListener("mousedown", (e) => startDrawFrom(e.clientX, e.clientY));
+    drawingCanvas.addEventListener("mousemove", (e) => moveDrawFrom(e.clientX, e.clientY));
+    window.addEventListener("mouseup", stopDraw);
+    drawingCanvas.addEventListener("touchstart", (e) => { e.preventDefault(); const t = e.touches[0]; startDrawFrom(t.clientX, t.clientY); });
+    drawingCanvas.addEventListener("touchmove", (e) => { e.preventDefault(); const t = e.touches[0]; moveDrawFrom(t.clientX, t.clientY); });
+    window.addEventListener("touchend", stopDraw);
+
+    function startDrawFrom(x, y) {
+      if (!chkDrawing.checked) return;
+      if (!page().attachment && page().drawing === null) return;
+      const rect = drawingCanvas.getBoundingClientRect();
+      const sx = drawingCanvas.width / rect.width;
+      const sy = drawingCanvas.height / rect.height;
+      const px = (x - rect.left) * sx;
+      const py = (y - rect.top) * sy;
+      drawing = true;
+      lastPt = { x: px, y: py };
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = penColor.value;
+      ctx.lineWidth = parseInt(penSize.value, 10) * Math.max(sx, sy);
+    }
+    function moveDrawFrom(x, y) {
+      if (!drawing) return;
+      const rect = drawingCanvas.getBoundingClientRect();
+      const sx = drawingCanvas.width / rect.width;
+      const sy = drawingCanvas.height / rect.height;
+      const px = (x - rect.left) * sx;
+      const py = (y - rect.top) * sy;
+      ctx.beginPath();
+      ctx.moveTo(lastPt.x, lastPt.y);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+      lastPt = { x: px, y: py };
+    }
+    function stopDraw() {
+      if (!drawing) return;
+      drawing = false;
+      page().drawing = drawingCanvas.toDataURL();
+      saveState();
+    }
+
+    /* =========================================================
+       Anexos
+       ========================================================= */
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+        page().attachment = {
+          type: isPdf ? "pdf" : "image",
+          dataUrl: e.target.result,
+          name: f.name,
+          currentPdfPage: 1,
+          pageCount: 1,
+        };
+        saveState();
+        renderUI();
+      };
+      reader.readAsDataURL(f);
+      fileInput.value = "";
+    });
+
+    $("btnDelAttachment").addEventListener("click", () => {
+      if (!page().attachment) return;
+      if (!confirm("Remover este anexo da página?")) return;
+      page().attachment = null;
+      page().drawing = null;
+      saveState();
+      renderUI();
+    });
+
+    $("btnClearDrawing").addEventListener("click", () => {
+      if (!page().drawing) return;
+      if (!confirm("Limpar todo o desenho nesta página?")) return;
+      page().drawing = null;
+      ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      saveState();
+    });
+
+    $("btnSnap").addEventListener("click", async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("Este navegador não suporta acesso à câmera. Use HTTPS/localhost ou anexe um arquivo.");
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        const video = document.createElement("video");
+        video.srcObject = stream;
+        video.play();
+        await new Promise((r) => (video.onloadedmetadata = r));
+        const c = document.createElement("canvas");
+        c.width = video.videoWidth;
+        c.height = video.videoHeight;
+        c.getContext("2d").drawImage(video, 0, 0);
+        stream.getTracks().forEach((t) => t.stop());
+        page().attachment = {
+          type: "image",
+          dataUrl: c.toDataURL("image/jpeg", 0.85),
+          name: "foto-camera.jpg",
+          pageCount: 1,
+        };
+        saveState();
+        renderUI();
+      } catch (e) {
+        alert("Não foi possível acessar a câmera: " + e.message);
+      }
+    });
+
+    /* =========================================================
+       Editor: salvar + formatação
+       ========================================================= */
+    editor.addEventListener("input", () => {
+      page().text = editor.innerHTML;
+      saveState();
+    });
+
+    function execCmd(cmd) {
+      editor.focus();
+      document.execCommand(cmd, false, null);
+    }
+    $("btnBold").addEventListener("click", () => execCmd("bold"));
+    $("btnItalic").addEventListener("click", () => execCmd("italic"));
+    $("btnUnderline").addEventListener("click", () => execCmd("underline"));
+    $("fontSize").addEventListener("input", (e) => {
+      editor.style.fontSize = e.target.value + "px";
+      savePrefs();
+    });
+
+    $("btnExportText").addEventListener("click", () => {
+      const blob = new Blob([editor.innerText], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (notebook().name || "caderno") + "-pagina-" + (state.activePageIndex + 1) + ".txt";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    /* =========================================================
+       Cadernos e páginas
+       ========================================================= */
+    function newPage() {
+      notebook().pages.push(defaultPage());
+      state.activePageIndex = notebook().pages.length - 1;
+      currentPdfDoc = null;
+      saveState();
+      renderUI();
+      editor.focus();
+    }
+    $("btnNewPage").addEventListener("click", newPage);
+    $("btnPrevPage").addEventListener("click", () => {
+      if (state.activePageIndex > 0) { state.activePageIndex--; currentPdfDoc = null; saveState(); renderUI(); }
+    });
+    $("btnNextPage").addEventListener("click", () => {
+      if (state.activePageIndex < notebook().pages.length - 1) { state.activePageIndex++; currentPdfDoc = null; saveState(); renderUI(); }
+    });
+    $("btnNewNotebook").addEventListener("click", () => {
+      const name = prompt("Nome do novo caderno:", "Novo Caderno");
+      if (name === null) return;
+      const nb = { id: "nb" + Date.now(), name: name, pages: [defaultPage()] };
+      state.notebooks.push(nb);
+      state.activeNotebookId = nb.id;
+      state.activePageIndex = 0;
+      saveState();
+      renderUI();
+    });
+    notebookName.addEventListener("change", () => {
+      notebook().name = notebookName.value || "Sem nome";
+      saveState();
+    });
+
+    /* =========================================================
+       Bíblia (dados locais em data/biblia)
+       ========================================================= */
+    const BOOK_META = [
+      { osis: "Gen",  names: ["Gênesis", "Genesis", "בראשית"], ch: 50 },
+      { osis: "Exod", names: ["Êxodo", "Exodus", "שמות"], ch: 40 },
+      { osis: "Lev",  names: ["Levítico", "Leviticus", "ויקרא"], ch: 27 },
+      { osis: "Num",  names: ["Números", "Numbers", "במדבר"], ch: 36 },
+      { osis: "Deut", names: ["Deuteronômio", "Deuteronomy", "דברים"], ch: 34 },
+      { osis: "Josh", names: ["Josué", "Joshua", "יהושע"], ch: 24 },
+      { osis: "Judg", names: ["Juízes", "Judges", "שופטים"], ch: 21 },
+      { osis: "Ruth", names: ["Rute", "Ruth", "רות"], ch: 4 },
+      { osis: "1Sam", names: ["1 Samuel", "1 Samuel", "שמואל א"], ch: 31 },
+      { osis: "2Sam", names: ["2 Samuel", "2 Samuel", "שמואל ב"], ch: 24 },
+      { osis: "1Kgs", names: ["1 Reis", "1 Kings", "מלכים א"], ch: 22 },
+      { osis: "2Kgs", names: ["2 Reis", "2 Kings", "מלכים ב"], ch: 25 },
+      { osis: "1Chr", names: ["1 Crônicas", "1 Chronicles", "דברי הימים א"], ch: 29 },
+      { osis: "2Chr", names: ["2 Crônicas", "2 Chronicles", "דברי הימים ב"], ch: 36 },
+      { osis: "Ezra", names: ["Esdras", "Ezra", "עזרא"], ch: 10 },
+      { osis: "Neh",  names: ["Neemias", "Nehemiah", "נחמיה"], ch: 13 },
+      { osis: "Esth", names: ["Ester", "Esther", "אסתר"], ch: 10 },
+      { osis: "Job",  names: ["Jó", "Job", "איוב"], ch: 42 },
+      { osis: "Ps",   names: ["Salmos", "Psalms", "תהלים"], ch: 150 },
+      { osis: "Prov", names: ["Provérbios", "Proverbs", "משלי"], ch: 31 },
+      { osis: "Eccl", names: ["Eclesiastes", "Ecclesiastes", "קהלת"], ch: 12 },
+      { osis: "Song", names: ["Cantares", "Song of Solomon", "שיר השירים"], ch: 8 },
+      { osis: "Isa",  names: ["Isaías", "Isaiah", "ישעיהו"], ch: 66 },
+      { osis: "Jer",  names: ["Jeremias", "Jeremiah", "ירמיהו"], ch: 52 },
+      { osis: "Lam",  names: ["Lamentações", "Lamentations", "איכה"], ch: 5 },
+      { osis: "Ezek", names: ["Ezequiel", "Ezekiel", "יחזקאל"], ch: 48 },
+      { osis: "Dan",  names: ["Daniel", "Daniel", "דניאל"], ch: 12 },
+      { osis: "Hos",  names: ["Oseias", "Hosea", "הושע"], ch: 14 },
+      { osis: "Joel", names: ["Joel", "Joel", "יואל"], ch: 3 },
+      { osis: "Amos", names: ["Amós", "Amos", "עמוס"], ch: 9 },
+      { osis: "Obad", names: ["Obadias", "Obadiah", "עובדיה"], ch: 1 },
+      { osis: "Jonah",names: ["Jonas", "Jonah", "יונה"], ch: 4 },
+      { osis: "Mic",  names: ["Miqueias", "Micah", "מיכה"], ch: 7 },
+      { osis: "Nah",  names: ["Naum", "Nahum", "נחום"], ch: 3 },
+      { osis: "Hab",  names: ["Habacuque", "Habakkuk", "חבקוק"], ch: 3 },
+      { osis: "Zeph", names: ["Sofonias", "Zephaniah", "צפניה"], ch: 3 },
+      { osis: "Hag",  names: ["Ageu", "Haggai", "חגי"], ch: 2 },
+      { osis: "Zech", names: ["Zacarias", "Zechariah", "זכריה"], ch: 14 },
+      { osis: "Mal",  names: ["Malaquias", "Malachi", "מלאכי"], ch: 4 },
+      { osis: "Matt", names: ["Mateus", "Matthew", null], ch: 28 },
+      { osis: "Mark", names: ["Marcos", "Mark", null], ch: 16 },
+      { osis: "Luke", names: ["Lucas", "Luke", null], ch: 24 },
+      { osis: "John", names: ["João", "John", null], ch: 21 },
+      { osis: "Acts", names: ["Atos", "Acts", null], ch: 28 },
+      { osis: "Rom",  names: ["Romanos", "Romans", null], ch: 16 },
+      { osis: "1Cor", names: ["1 Coríntios", "1 Corinthians", null], ch: 16 },
+      { osis: "2Cor", names: ["2 Coríntios", "2 Corinthians", null], ch: 13 },
+      { osis: "Gal",  names: ["Gálatas", "Galatians", null], ch: 6 },
+      { osis: "Eph",  names: ["Efésios", "Ephesians", null], ch: 6 },
+      { osis: "Phil", names: ["Filipenses", "Philippians", null], ch: 4 },
+      { osis: "Col",  names: ["Colossenses", "Colossians", null], ch: 4 },
+      { osis: "1Thess",names:["1 Tessalonicenses", "1 Thessalonians", null], ch: 5 },
+      { osis: "2Thess",names:["2 Tessalonicenses", "2 Thessalonians", null], ch: 3 },
+      { osis: "1Tim", names: ["1 Timóteo", "1 Timothy", null], ch: 6 },
+      { osis: "2Tim", names: ["2 Timóteo", "2 Timothy", null], ch: 4 },
+      { osis: "Titus",names: ["Tito", "Titus", null], ch: 3 },
+      { osis: "Phlm", names: ["Filemom", "Philemon", null], ch: 1 },
+      { osis: "Heb",  names: ["Hebreus", "Hebrews", null], ch: 13 },
+      { osis: "Jas",  names: ["Tiago", "James", null], ch: 5 },
+      { osis: "1Pet", names: ["1 Pedro", "1 Peter", null], ch: 5 },
+      { osis: "2Pet", names: ["2 Pedro", "2 Peter", null], ch: 3 },
+      { osis: "1John",names: ["1 João", "1 John", null], ch: 5 },
+      { osis: "2John",names: ["2 João", "2 John", null], ch: 1 },
+      { osis: "3John",names: ["3 João", "3 John", null], ch: 1 },
+      { osis: "Jude", names: ["Judas", "Jude", null], ch: 1 },
+      { osis: "Rev",  names: ["Apocalipse", "Revelation", null], ch: 22 },
+    ];
+
+    function bibleLang() {
+      return state.bible.hebrew ? state.bible.version : state.bible.version;
+    }
+    function activeBibleSlug() {
+      return state.bible.version; // almeida-livre | kjv | web | asv
+    }
+    function isHebrew() {
+      return state.bible.hebrew;
+    }
+    function hebrewSlug() { return "wlc"; }
+
+    let bibleCache = {};
+    let bibleBooks = null; // lista de livros para o current version
+
+    function populatesBookList() {
+      const sel = $("bibleBook");
+      sel.innerHTML = "";
+      const he = isHebrew();
+      BOOK_META.forEach((m, i) => {
+        if (he && m.names[2] === null) return; // esconder NT no hebraico
+        const opt = document.createElement("option");
+        opt.value = m.osis;
+        const label = he ? (m.names[2] || m.names[0]) + " — " + m.names[0] : m.names[0] + (m.names[2] ? " — "+m.names[2] : "");
+        opt.textContent = label;
+        sel.appendChild(opt);
+      });
+      sel.value = state.bible.book;
+    }
+
+    function populateChapterList(bookMeta) {
+      const sel = $("bibleChapter");
+      sel.innerHTML = "";
+      for (let i = 1; i <= bookMeta.ch; i++) {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = "Cap. " + i;
+        sel.appendChild(opt);
+      }
+      sel.value = state.bible.chapter;
+    }
+
+    async function loadBookJson(slug, osis) {
+      const key = slug + "/" + osis;
+      if (bibleCache[key]) return bibleCache[key];
+      const res = await fetch("data/biblia/" + slug + "/books/" + osis + ".json");
+      if (!res.ok) throw new Error("Livro não encontrado: " + osis);
+      const data = await res.json();
+      bibleCache[key] = data;
+      return data;
+    }
+
+    function renderBibleChapter(bookData, chapterNum) {
+      const content = $("bibleContent");
+      const ch = bookData.chapters.find((c) => c.chapter === chapterNum);
+      if (!ch) { content.innerHTML = "<p class='text-gray-400'>Capítulo não encontrado.</p>"; return; }
+
+      if (isHebrew()) {
+        content.className = "flex-1 overflow-auto p-6 bg-white text-gray-900 leading-relaxed hebrew-text";
+        let html = '<div class="text-gray-500 text-base mb-4" dir="ltr">' + (bookData.englishName || "") + "</div>";
+        ch.verses.forEach((v) => {
+          html += '<p class="mb-2"><span class="text-gray-500 ml-1">' + v.number + '.</span> ' + v.text + "</p>";
+        });
+        content.innerHTML = html;
+      } else {
+        content.className = "flex-1 overflow-auto p-6 bg-white text-gray-900 leading-relaxed";
+        let html = '<div class="text-lg font-semibold text-gray-700 mb-2">' +
+          (bookData.englishName || "") + " " + chapterNum + "</div>";
+        const paras = [];
+        let cur = "";
+        ch.verses.forEach((v) => {
+          cur += '<span class="font-semibold text-gray-500">' + v.number + '.</span> ' + v.text + " ";
+        });
+        html += "<p> " + cur.trim() + "</p>";
+        content.innerHTML = html;
+      }
+    }
+
+    async function loadBible() {
+      const slug = activeBibleSlug();
+      const he = isHebrew();
+      populatesBookList();
+
+      const meta = BOOK_META.find((m) => m.osis === state.bible.book);
+      if (!meta) { state.bible.book = "Gen"; return loadBible(); }
+
+      populateChapterList(meta);
+
+      try {
+        const useSlug = he ? hebrewSlug() : slug;
+        const data = await loadBookJson(useSlug, state.bible.book);
+        renderBibleChapter(data, state.bible.chapter);
+      } catch (e) {
+        $("bibleContent").innerHTML = "<p class='text-red-500'>Erro ao carregar o texto. É necessário servir via HTTP (não abrir direto do arquivo). Detalhe: " + e.message + "</p>";
+      }
+    }
+
+    $("bibleVersion").addEventListener("change", (e) => {
+      state.bible.version = e.target.value;
+      saveState();
+      loadBible();
+    });
+    $("chkHebrew").addEventListener("change", (e) => {
+      state.bible.hebrew = e.target.checked;
+      // hebraico só tem AT
+      const m = BOOK_META.find((m) => m.osis === state.bible.book);
+      if (state.bible.hebrew && m && m.names[2] === null) {
+        state.bible.book = "Gen";
+        state.bible.chapter = 1;
+      }
+      saveState();
+      loadBible();
+    });
+    $("bibleBook").addEventListener("change", (e) => {
+      state.bible.book = e.target.value;
+      state.bible.chapter = 1;
+      saveState();
+      loadBible();
+    });
+    $("bibleChapter").addEventListener("change", (e) => {
+      state.bible.chapter = parseInt(e.target.value, 10);
+      saveState();
+      loadBible();
+    });
+    $("bibleFontRange").addEventListener("input", (e) => {
+      const content = $("bibleContent");
+      content.style.fontSize = e.target.value + "px";
+    });
+    $("bibleCopy").addEventListener("click", () => {
+      const content = $("bibleContent");
+      const text = content.innerText;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => alert("Copiado!")).catch(() => alert("Não foi possível copiar."));
+      } else {
+        alert("Navegador sem suporte a clipboard.");
+      }
+    });
+
+    /* =========================================================
+       Redimensionar overlay
+       ========================================================= */
+    function onViewerResize() {
+      const att = page().attachment;
+      if (!att) return;
+      if (att.type === "pdf" && currentPdfDoc) {
+        drawPdfPage(currentPdfDoc, att.currentPdfPage || 1);
+      } else if (att.type === "image") {
+        if (mediaLayer.complete) {
+          positionCanvas(mediaLayer.naturalWidth, mediaLayer.naturalHeight);
+          if (page().drawing) {
+            const img = new Image();
+            img.onload = () => { ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height); ctx.drawImage(img, 0, 0, drawingCanvas.width, drawingCanvas.height); };
+            img.src = page().drawing;
+          }
+        }
+      }
+    }
+    window.addEventListener("resize", onViewerResize);
+    viewer.addEventListener("resize", onViewerResize);
+
+    function savePrefs() {
+      page().fontSize = editor.style.fontSize;
+    }
+    if (page().fontSize) editor.style.fontSize = page().fontSize;
+
+    /* =========================================================
+       Bootstrap
+       ========================================================= */
+    loadState();
+    // configurar controles da Bíblia com o estado carregado
+    $("bibleVersion").value = state.bible.version;
+    $("chkHebrew").checked = state.bible.hebrew;
+    renderUI();
+    applyLayout();
+    applyTab();
+  </script>
+</body>
+</html>

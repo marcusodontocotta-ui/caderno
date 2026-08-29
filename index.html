@@ -183,7 +183,7 @@
       ],
       activeNotebookId: "default",
       activePageIndex: 0,
-      layout: "split",        // 'split' | 'full'
+      layout: "split",        // 'split' | 'fullRight' | 'fullEditor'
       bible: {
         version: "almeida-livre",
         hebrew: false,
@@ -267,17 +267,32 @@
        Layout: 50/50 vs tela cheia
        ========================================================= */
     function applyLayout() {
-      if (state.layout === "full") {
+      if (state.layout === "fullRight") {
+        // Anexos/Bíblia em tela cheia
         editorPane.classList.add("hidden");
         editorPane.classList.remove("md:w-1/2");
         rightPane.classList.remove("md:w-1/2");
         rightPane.classList.add("w-full");
         mainLayout.classList.remove("md:flex-row");
         mainLayout.classList.add("flex-col");
+        btnLayout.textContent = "✏️ Editor cheio";
+      } else if (state.layout === "fullEditor") {
+        // Caderno (editor) em tela cheia
+        editorPane.classList.remove("hidden");
+        editorPane.classList.remove("md:w-1/2");
+        editorPane.classList.add("w-full");
+        rightPane.classList.add("hidden");
+        rightPane.classList.remove("md:w-1/2");
+        rightPane.classList.remove("w-full");
+        mainLayout.classList.remove("md:flex-row");
+        mainLayout.classList.add("flex-col");
         btnLayout.textContent = "⊞ 50/50";
       } else {
+        // 50/50
         editorPane.classList.remove("hidden");
         editorPane.classList.add("md:w-1/2");
+        editorPane.classList.remove("w-full");
+        rightPane.classList.remove("hidden");
         rightPane.classList.add("md:w-1/2");
         rightPane.classList.remove("w-full");
         mainLayout.classList.add("md:flex-row");
@@ -288,10 +303,11 @@
     }
 
     btnLayout.addEventListener("click", () => {
-      state.layout = state.layout === "split" ? "full" : "split";
+      // split -> fullRight -> fullEditor -> split
+      state.layout = state.layout === "split" ? "fullRight" : (state.layout === "fullRight" ? "fullEditor" : "split");
       saveState();
       applyLayout();
-      if (state.layout === "full") {
+      if (state.layout !== "split") {
         const el = document.documentElement;
         if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
         else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();

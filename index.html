@@ -24,6 +24,9 @@
     mark { background: #ffe45c; color: inherit; padding: 0 1px; border-radius: 2px; }
     #bibleContent mark { background: #ffe45c; }
     u { text-decoration-thickness: 1.5px; }
+    #drawer { transition: transform 0.25s ease; }
+    #drawer.open { transform: translateX(0); }
+    #drawerBackdrop { transition: opacity 0.2s ease; }
   </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -39,6 +42,9 @@
       />
     </div>
     <div class="flex items-center gap-2 flex-wrap justify-end">
+      <button id="btnNotebooks" title="Abrir meus cadernos" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-1.5 rounded transition">
+        📚 Cadernos
+      </button>
       <button id="btnLayout" title="Alternar 50/50 ou tela cheia" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded transition">
         ⛶ Tela cheia
       </button>
@@ -58,6 +64,21 @@
     </div>
   </header>
 
+  <!-- Drawer lateral: lista de cadernos -->
+  <div id="drawerBackdrop" class="fixed inset-0 bg-black/30 z-40 hidden"></div>
+  <aside id="drawer" class="fixed top-0 left-0 h-full w-80 max-w-[85vw] bg-white shadow-2xl z-50 flex flex-col -translate-x-full">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+      <h2 class="font-bold text-gray-800">📚 Meus Cadernos</h2>
+      <button id="btnCloseDrawer" class="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
+    </div>
+    <div id="notebookList" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
+    <div class="p-3 border-t border-gray-200 shrink-0">
+      <button id="btnNewNotebookDrawer" class="w-full text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-2 rounded transition">
+        + Novo caderno
+      </button>
+    </div>
+  </aside>
+
   <!-- Corpo: 50/50 ou tela cheia -->
   <main id="mainLayout" class="flex-1 flex flex-col md:flex-row overflow-hidden">
 
@@ -71,6 +92,10 @@
         <button id="btnUnderline" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 underline">U</button>
         <button id="btnHighlight" title="Realçar (grifar) texto selecionado" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-yellow-100">🖍 Realçar</button>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
+      </div>
+      <div class="shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
+        <span class="text-xs font-semibold text-gray-500 mr-1 shrink-0">Páginas:</span>
+        <div id="pageTabs" class="flex items-center gap-1 overflow-x-auto"></div>
       </div>
       <div
         id="editor"
@@ -260,6 +285,10 @@
     const tabAnnex = $("tabAnnex");
     const tabBible = $("tabBible");
     const btnLayout = $("btnLayout");
+    const drawer = $("drawer");
+    const drawerBackdrop = $("drawerBackdrop");
+    const notebookList = $("notebookList");
+    const pageTabs = $("pageTabs");
 
     const ctx = drawingCanvas.getContext("2d");
 
@@ -354,6 +383,7 @@
       const n = notebook();
       notebookName.value = n.name;
       pageIndicator.textContent = (state.activePageIndex + 1) + " / " + n.pages.length;
+      renderPageTabs();
       editor.innerHTML = page().text || "";
 
       const att = page().attachment;
@@ -694,6 +724,110 @@
       notebook().name = notebookName.value || "Sem nome";
       saveState();
     });
+
+    /* --------------------------------------------
+       Drawer lateral de cadernos + seletor de páginas
+       -------------------------------------------- */
+    function openDrawer() {
+      renderNotebookList();
+      drawer.classList.add("open");
+      drawerBackdrop.classList.remove("hidden");
+    }
+    function closeDrawer() {
+      drawer.classList.remove("open");
+      drawerBackdrop.classList.add("hidden");
+    }
+    $("btnNotebooks").addEventListener("click", openDrawer);
+    $("btnCloseDrawer").addEventListener("click", closeDrawer);
+    drawerBackdrop.addEventListener("click", closeDrawer);
+    $("btnNewNotebookDrawer").addEventListener("click", () => {
+      const name = prompt("Nome do novo caderno:", "Novo Caderno");
+      if (name === null) return;
+      const nb = { id: "nb" + Date.now(), name: name, pages: [defaultPage()] };
+      state.notebooks.push(nb);
+      state.activeNotebookId = nb.id;
+      state.activePageIndex = 0;
+      saveState();
+      renderNotebookList();
+      renderUI();
+      closeDrawer();
+    });
+
+    function renderNotebookList() {
+      notebookList.innerHTML = "";
+      state.notebooks.forEach((nb) => {
+        const item = document.createElement("div");
+        const active = nb.id === state.activeNotebookId;
+        item.className = "border rounded-lg overflow-hidden " + (active ? "border-blue-400 ring-1 ring-blue-200" : "border-gray-200");
+        const head = document.createElement("div");
+        head.className = "flex items-center gap-2 px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100";
+        head.innerHTML = '<span class="font-semibold text-gray-800 flex-1 truncate">' + escapeHtml(nb.name || "Sem nome") + "</span>" +
+          '<span class="text-xs text-gray-400 shrink-0">' + nb.pages.length + " pg</span>";
+        const actions = document.createElement("div");
+        actions.className = "flex items-center justify-end gap-1 px-2 pb-2";
+        actions.innerHTML =
+          '<button data-act="open" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-blue-50 text-blue-700">Abrir</button>' +
+          '<button data-act="rename" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">Renomear</button>' +
+          '<button data-act="del" class="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Excluir</button>';
+        head.addEventListener("click", () => selectNotebook(nb.id));
+        actions.addEventListener("click", (e) => {
+          const act = e.target.closest("button").getAttribute("data-act");
+          if (act === "open") selectNotebook(nb.id);
+          else if (act === "rename") {
+            const name = prompt("Novo nome do caderno:", nb.name);
+            if (name !== null && name.trim() !== "") { nb.name = name.trim(); saveState(); renderNotebookList(); renderUI(); }
+          } else if (act === "del") {
+            if (state.notebooks.length <= 1) { alert("Não é possível excluir o único caderno."); return; }
+            if (!confirm("Excluir o caderno \"" + nb.name + "\"? Esta ação não pode ser desfeita.")) return;
+            state.notebooks = state.notebooks.filter((x) => x.id !== nb.id);
+            if (state.activeNotebookId === nb.id) {
+              state.activeNotebookId = state.notebooks[0].id;
+              state.activePageIndex = 0;
+              currentPdfDoc = null;
+            }
+            saveState();
+            renderNotebookList();
+            renderUI();
+          }
+        });
+        item.appendChild(head);
+        item.appendChild(actions);
+        notebookList.appendChild(item);
+      });
+    }
+    function selectNotebook(id) {
+      const nb = state.notebooks.find((n) => n.id === id);
+      if (!nb) return;
+      state.activeNotebookId = id;
+      state.activePageIndex = 0;
+      currentPdfDoc = null;
+      saveState();
+      renderNotebookList();
+      renderUI();
+    }
+    function renderPageTabs() {
+      if (!pageTabs) return;
+      pageTabs.innerHTML = "";
+      const n = notebook();
+      for (let i = 0; i < n.pages.length; i++) {
+        const b = document.createElement("button");
+        b.textContent = (i + 1);
+        b.className = "w-7 h-7 shrink-0 text-xs rounded border transition " +
+          (i === state.activePageIndex ? "bg-blue-600 text-white border-blue-600 font-bold" : "bg-white border-gray-300 text-gray-600 hover:bg-gray-100");
+        b.title = "Página " + (i + 1);
+        b.addEventListener("click", () => {
+          if (i === state.activePageIndex) return;
+          state.activePageIndex = i;
+          currentPdfDoc = null;
+          saveState();
+          renderUI();
+        });
+        pageTabs.appendChild(b);
+      }
+    }
+    function escapeHtml(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
 
     /* =========================================================
        Bíblia (dados locais em data/biblia)

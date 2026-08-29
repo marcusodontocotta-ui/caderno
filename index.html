@@ -91,6 +91,12 @@
         <button id="btnItalic" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 italic">I</button>
         <button id="btnUnderline" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 underline">U</button>
         <button id="btnHighlight" title="Realçar (grifar) texto selecionado" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-yellow-100">🖍 Realçar</button>
+        <span class="w-px h-5 bg-gray-300 mx-1"></span>
+        <button id="btnAlignLeft" title="Alinhar à esquerda" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡←</button>
+        <button id="btnAlignCenter" title="Centralizar" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡</button>
+        <button id="btnAlignRight" title="Alinhar à direita" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡→</button>
+        <button id="btnAlignJustify" title="Justificar" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡⇔</button>
+        <span class="w-px h-5 bg-gray-300 mx-1"></span>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
       </div>
       <div class="shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
@@ -664,9 +670,19 @@
       editor.focus();
       document.execCommand(cmd, false, null);
     }
+    function execAlign(value) {
+      editor.focus();
+      document.execCommand("styleWithCSS", false, false);
+      document.execCommand(value, false, null);
+      saveState();
+    }
     $("btnBold").addEventListener("click", () => execCmd("bold"));
     $("btnItalic").addEventListener("click", () => execCmd("italic"));
     $("btnUnderline").addEventListener("click", () => execCmd("underline"));
+    $("btnAlignLeft").addEventListener("click", () => execAlign("justifyLeft"));
+    $("btnAlignCenter").addEventListener("click", () => execAlign("justifyCenter"));
+    $("btnAlignRight").addEventListener("click", () => execAlign("justifyRight"));
+    $("btnAlignJustify").addEventListener("click", () => execAlign("justifyFull"));
     $("btnHighlight").addEventListener("click", () => {
       editor.focus();
       const sel = window.getSelection();

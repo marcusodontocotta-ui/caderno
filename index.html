@@ -21,6 +21,9 @@
       pointer-events: none;
     }
     .hebrew-text { direction: rtl; font-family: "SBL Hebrew", "Frank Ruhl Hofshi", "Ezra SIL", "David", "Times New Roman", serif; font-size: 1.4rem; line-height: 2; }
+    mark { background: #ffe45c; color: inherit; padding: 0 1px; border-radius: 2px; }
+    #bibleContent mark { background: #ffe45c; }
+    u { text-decoration-thickness: 1.5px; }
   </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -66,6 +69,7 @@
         <button id="btnBold" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 font-bold">B</button>
         <button id="btnItalic" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 italic">I</button>
         <button id="btnUnderline" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 underline">U</button>
+        <button id="btnHighlight" title="Realçar (grifar) texto selecionado" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-yellow-100">🖍 Realçar</button>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
       </div>
       <div
@@ -104,6 +108,11 @@
           </label>
           <input id="penColor" type="color" value="#ef4444" class="w-7 h-7 border border-gray-300 rounded cursor-pointer" title="Cor da caneta" />
           <input id="penSize" type="range" min="1" max="20" value="4" class="w-20" title="Espessura da caneta" />
+          <select id="penTool" title="Ferramenta de desenho" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5">
+            <option value="pen">🖊️ Caneta</option>
+            <option value="marker">🖍️ Realçador</option>
+            <option value="line">📏 Linha</option>
+          </select>
           <button id="btnClearDrawing" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-gray-100">🧽 Limpar desenho</button>
           <button id="btnDelAttachment" class="text-xs px-2 py-1.5 rounded border border-red-300 text-red-600 hover:bg-red-50">🗑 Remover anexo</button>
         </div>
@@ -143,6 +152,9 @@
           <label class="text-xs flex items-center gap-1 text-gray-600 ml-1">
             <input id="bibleFontRange" type="range" min="12" max="40" value="17" class="w-20" /> A-
           </label>
+          <button id="bibleMark" title="Realçar o texto selecionado" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-yellow-100">🖍 Realçar</button>
+          <button id="bibleUnder" title="Sublinhar o texto selecionado" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-gray-100">U Sublinhar</button>
+          <button id="bibleUnmark" title="Remover realces/sublinhados desta página" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-red-50">🧹 Limpar marcas</button>
           <button id="bibleCopy" class="text-xs px-2 py-1.5 ml-auto rounded border border-gray-300 hover:bg-gray-100">📋 Copiar</button>
         </div>
 
@@ -177,6 +189,8 @@
         hebrew: false,
         book: "Gen",
         chapter: 1,
+        saved: {},      // render salvo por capítulo (preserva realces/sublinhados)
+        fontScale: 16,
       },
       activeTab: "annex",     // 'annex' | 'bible'
     };
@@ -191,7 +205,9 @@
         if (raw) state = JSON.parse(raw);
         state.layout = state.layout || "split";
         state.activeTab = state.activeTab || "annex";
-        state.bible = Object.assign({ version: "almeida-livre", hebrew: false, book: "Gen", chapter: 1 }, state.bible);
+        state.bible = Object.assign({ version: "almeida-livre", hebrew: false, book: "Gen", chapter: 1, saved: {}, fontScale: 16 }, state.bible);
+        if (!state.bible.saved) state.bible.saved = {};
+        if (!state.bible.fontScale) state.bible.fontScale = 16;
         state.notebooks.forEach((n) => n.pages.forEach((p) => { if (p.text === undefined) p.text = ""; }));
       } catch (e) {
         console.warn("Falha ao carregar estado", e);
@@ -237,6 +253,7 @@
     const chkDrawing = $("chkDrawing");
     const penColor = $("penColor");
     const penSize = $("penSize");
+    const penTool = $("penTool");
 
     const annexTab = $("annexTab");
     const bibleTab = $("bibleTab");
@@ -274,6 +291,14 @@
       state.layout = state.layout === "split" ? "full" : "split";
       saveState();
       applyLayout();
+      if (state.layout === "full") {
+        const el = document.documentElement;
+        if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }
     });
 
     /* =========================================================
@@ -450,6 +475,7 @@
        ========================================================= */
     let drawing = false;
     let lastPt = null;
+    let lineStart = null;
 
     drawingCanvas.addEventListener("mousedown", (e) => startDrawFrom(e.clientX, e.clientY));
     drawingCanvas.addEventListener("mousemove", (e) => moveDrawFrom(e.clientX, e.clientY));
@@ -468,10 +494,12 @@
       const py = (y - rect.top) * sy;
       drawing = true;
       lastPt = { x: px, y: py };
+      lineStart = { x: px, y: py };
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.strokeStyle = penColor.value;
-      ctx.lineWidth = parseInt(penSize.value, 10) * Math.max(sx, sy);
+      ctx.globalAlpha = penTool.value === "marker" ? 0.35 : 1;
+      ctx.lineWidth = (penTool.value === "marker" ? 3 : 1) * parseInt(penSize.value, 10) * Math.max(sx, sy);
     }
     function moveDrawFrom(x, y) {
       if (!drawing) return;
@@ -480,6 +508,10 @@
       const sy = drawingCanvas.height / rect.height;
       const px = (x - rect.left) * sx;
       const py = (y - rect.top) * sy;
+      if (penTool.value === "line") {
+        lastPt = { x: px, y: py };
+        return;
+      }
       ctx.beginPath();
       ctx.moveTo(lastPt.x, lastPt.y);
       ctx.lineTo(px, py);
@@ -489,6 +521,18 @@
     function stopDraw() {
       if (!drawing) return;
       drawing = false;
+      if (penTool.value === "line") {
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = parseInt(penSize.value, 10) * Math.max(
+          drawingCanvas.width / drawingCanvas.getBoundingClientRect().width,
+          drawingCanvas.height / drawingCanvas.getBoundingClientRect().height
+        );
+        ctx.beginPath();
+        ctx.moveTo(lineStart.x, lineStart.y);
+        ctx.lineTo(lastPt.x, lastPt.y);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
       page().drawing = drawingCanvas.toDataURL();
       saveState();
     }
@@ -577,6 +621,16 @@
     $("btnBold").addEventListener("click", () => execCmd("bold"));
     $("btnItalic").addEventListener("click", () => execCmd("italic"));
     $("btnUnderline").addEventListener("click", () => execCmd("underline"));
+    $("btnHighlight").addEventListener("click", () => {
+      editor.focus();
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editor.contains(sel.anchorNode)) {
+        document.execCommand("hiliteColor", false, "#ffe45c");
+      } else {
+        alert("Selecione um trecho do texto no editor para realçar.");
+      }
+      saveState();
+    });
     $("fontSize").addEventListener("input", (e) => {
       editor.style.fontSize = e.target.value + "px";
       savePrefs();
@@ -758,10 +812,30 @@
       return data;
     }
 
+    function bibleSaveKey() {
+      const slug = isHebrew() ? hebrewSlug() : activeBibleSlug();
+      return slug + "|" + state.bible.book + "|" + state.bible.chapter;
+    }
+    function saveBibleRender(html) {
+      state.bible.saved[bibleSaveKey()] = html;
+      saveState();
+    }
+
     function renderBibleChapter(bookData, chapterNum) {
       const content = $("bibleContent");
       const ch = bookData.chapters.find((c) => c.chapter === chapterNum);
       if (!ch) { content.innerHTML = "<p class='text-gray-400'>Capítulo não encontrado.</p>"; return; }
+
+      const saved = state.bible.saved[bibleSaveKey()];
+      if (saved) {
+        if (isHebrew()) {
+          content.className = "flex-1 overflow-auto p-6 bg-white text-gray-900 leading-relaxed hebrew-text";
+        } else {
+          content.className = "flex-1 overflow-auto p-6 bg-white text-gray-900 leading-relaxed";
+        }
+        content.innerHTML = saved;
+        return;
+      }
 
       if (isHebrew()) {
         content.className = "flex-1 overflow-auto p-6 bg-white text-gray-900 leading-relaxed hebrew-text";
@@ -770,6 +844,7 @@
           html += '<p class="mb-2"><span class="text-gray-500 ml-1">' + v.number + '.</span> ' + v.text + "</p>";
         });
         content.innerHTML = html;
+        saveBibleRender(html);
       } else {
         content.className = "flex-1 overflow-auto p-6 bg-white text-gray-900 leading-relaxed";
         let html = '<div class="text-lg font-semibold text-gray-700 mb-2">' +
@@ -781,6 +856,7 @@
         });
         html += "<p> " + cur.trim() + "</p>";
         content.innerHTML = html;
+        saveBibleRender(html);
       }
     }
 
@@ -842,6 +918,41 @@
       } else {
         alert("Navegador sem suporte a clipboard.");
       }
+    });
+
+    // Marcar realce/sublinhado no texto bíblico selecionado
+    function wrapSelectionIn(tagName) {
+      const content = $("bibleContent");
+      if (!content) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        alert("Selecione primeiro um trecho do texto bíblico.");
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      if (!content.contains(container.nodeType === 3 ? container.parentNode : container)) {
+        alert("Selecione o texto dentro da área da Bíblia.");
+        return;
+      }
+      const el = document.createElement(tagName);
+      try {
+        range.surroundContents(el);
+      } catch (e) {
+        const frag = range.extractContents();
+        el.appendChild(frag);
+        range.insertNode(el);
+      }
+      sel.removeAllRanges();
+      saveBibleRender(content.innerHTML);
+    }
+    $("bibleMark").addEventListener("click", () => wrapSelectionIn("mark"));
+    $("bibleUnder").addEventListener("click", () => wrapSelectionIn("u"));
+    $("bibleUnmark").addEventListener("click", () => {
+      if (!confirm("Remover todos os realces e sublinhados desta página?")) return;
+      delete state.bible.saved[bibleSaveKey()];
+      saveState();
+      loadBible();
     });
 
     /* =========================================================

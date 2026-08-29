@@ -120,6 +120,7 @@
         </span>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
         <button id="btnExportPdf" class="text-xs px-2 py-1 rounded border border-red-300 text-red-700 bg-red-50 hover:bg-red-100">⬇ Exportar PDF</button>
+        <button id="btnExportAllPdf" class="text-xs px-2 py-1 rounded border border-red-300 text-red-700 bg-red-50 hover:bg-red-100">⬇ Exportar caderno (PDF)</button>
       </div>
       <div class="shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
         <span class="text-xs font-semibold text-gray-500 mr-1 shrink-0">Páginas:</span>
@@ -996,38 +997,52 @@
       URL.revokeObjectURL(url);
     });
 
-    $("btnExportPdf").addEventListener("click", () => {
-      const title = (notebook().name || "caderno") + " — Página " + (state.activePageIndex + 1);
-      const name = notebook().name || "caderno";
+    // Exportar página(s) como PDF via diálogo de impressão
+    function openPdfWindow(title, name, pagesHtml) {
       const w = window.open("", "_blank");
       if (!w) { alert("Permita pop-ups para exportar em PDF."); return; }
-      const bodyHtml = editor.innerHTML || "<p></p>";
-      // Sanitizar Título/headings copiados da página
-      const styled = bodyHtml
-        .replace(/<h[1-6][^>]*>/gi, "")              // remove tags de título do editor
-        .replace(/<\/h[1-6]>/gi, "</p>");
+      const bodyHtml = pagesHtml.map((h) => {
+        return "<div class='page-block'>" +
+          (h || "<p></p>")
+            .replace(/<h[1-6][^>]*>/gi, "")
+            .replace(/<\/h[1-6]>/gi, "</p>") +
+          "</div>";
+      }).join("");
       w.document.write(
         "<!DOCTYPE html><html><head><meta charset='utf-8'>" +
         "<title>" + title + "</title>" +
         "<style>" +
         "body { font-family: Georgia, 'Times New Roman', serif; color: #111; line-height: 1.5; padding: 40px; }" +
         "h1 { font-size: 22px; margin: 0 0 4px; }" +
-        "h2, h3, h4 { margin: 20px 0 6px; }" +
         "p { margin: 0 0 10px; }" +
         "img { max-width: 100%; height: auto; }" +
         "table { border-collapse: collapse; margin: 10px 0; }" +
         "table td, table th { border: 1px solid #999; padding: 4px 8px; }" +
+        ".page-block { page-break-after: always; }" +
+        ".page-block:last-child { page-break-after: auto; }" +
+        "@media print { .page-block { page-break-inside: avoid; } }" +
         "</style></head><body>" +
         "<h1>" + name + "</h1>" +
         "<p style='color:#666;margin-bottom:24px'>" + title + "</p>" +
-        styled +
+        bodyHtml +
         "</body></html>"
       );
       w.document.close();
       w.focus();
-      // aguardar imagens/recursos carregarem antes de imprimir
       w.onload = () => { w.print(); w.close(); };
-      setTimeout(() => { try { w.print(); w.close(); } catch(e) {} }, 300);
+      setTimeout(() => { try { w.print(); w.close(); } catch(e) {} }, 400);
+    }
+
+    $("btnExportPdf").addEventListener("click", () => {
+      const title = (notebook().name || "caderno") + " — Página " + (state.activePageIndex + 1);
+      openPdfWindow(title, notebook().name || "caderno", [editor.innerHTML]);
+    });
+
+    $("btnExportAllPdf").addEventListener("click", () => {
+      const nb = notebook();
+      const name = nb.name || "caderno";
+      const pagesHtml = nb.pages.map((p) => p.text);
+      openPdfWindow(name + " — todas as páginas", name, pagesHtml);
     });
 
     /* =========================================================

@@ -675,6 +675,39 @@
       saveState();
     });
 
+    // Guardar a última posição do cursor dentro do editor para
+    // reinserir imagens/planilhas no lugar certo (não no topo).
+    let savedSelection = null;
+    function captureSelection() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      if (range.collapsed && editor.contains(range.startContainer)) {
+        savedSelection = range.cloneRange();
+      }
+    }
+    document.addEventListener("selectionchange", () => {
+      if (document.activeElement === editor) captureSelection();
+    });
+    function restoreAndInsert(html) {
+      editor.focus();
+      const sel = window.getSelection();
+      if (savedSelection && editor.contains(savedSelection.startContainer)) {
+        sel.removeAllRanges();
+        sel.addRange(savedSelection);
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      document.execCommand("insertHTML", false, html);
+      captureSelection();
+      page().text = editor.innerHTML;
+      saveState();
+    }
+
     function execCmd(cmd) {
       editor.focus();
       document.execCommand(cmd, false, null);
@@ -702,10 +735,7 @@
       if (isImage) {
         const reader = new FileReader();
         reader.onload = (ev) => {
-          editor.focus();
-          document.execCommand("insertHTML", false, '<img src="' + ev.target.result + '" alt="imagem" />');
-          page().text = editor.innerHTML;
-          saveState();
+          restoreAndInsert('<img src="' + ev.target.result + '" alt="imagem" />');
         };
         reader.readAsDataURL(f);
       } else {
@@ -724,10 +754,7 @@
             html += "</tr>";
           });
           html += "</table>";
-          editor.focus();
-          document.execCommand("insertHTML", false, html);
-          page().text = editor.innerHTML;
-          saveState();
+          restoreAndInsert(html);
         };
         reader.readAsText(f);
       }
@@ -794,10 +821,7 @@
           if (!blob) return;
           const reader = new FileReader();
           reader.onload = (ev) => {
-            editor.focus();
-            document.execCommand("insertHTML", false, '<img src="' + ev.target.result + '" alt="colada" />');
-            page().text = editor.innerHTML;
-            saveState();
+            restoreAndInsert('<img src="' + ev.target.result + '" alt="colada" />');
           };
           reader.readAsDataURL(blob);
           return;

@@ -104,7 +104,13 @@
         <label title="Inserir imagem no cursor" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 cursor-pointer">🖼 Imagem
           <input id="imgInput" type="file" accept="image/*,.xlsx,.xls,.csv" class="hidden" />
         </label>
-        <button id="btnImgSize" title="Redimensionar a imagem selecionada" class="hidden text-xs px-2 py-1 rounded border border-blue-400 bg-blue-50 text-blue-700 hover:bg-blue-100">↔ Tamanho</button>
+        <button id="btnImgSize" title="Redimensionar a imagem selecionada" class="text-xs px-2 py-1 rounded border border-blue-400 bg-blue-50 text-blue-700 hover:bg-blue-100 hidden">↔ Tamanho</button>
+        <span id="imgSizeBox" class="hidden items-center gap-2 text-xs text-gray-600">
+          <label title="Largura da imagem" class="cursor-pointer">↔
+            <input id="imgSizeSlider" type="range" min="40" max="900" value="300" class="w-32 align-middle" />
+          </label>
+          <span id="imgSizeVal" class="text-gray-500 w-10">300</span>
+        </span>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
       </div>
       <div class="shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
@@ -304,6 +310,9 @@
     const notebookList = $("notebookList");
     const pageTabs = $("pageTabs");
     const btnImgSize = $("btnImgSize");
+    const imgSizeBox = $("imgSizeBox");
+    const imgSizeSlider = $("imgSizeSlider");
+    const imgSizeVal = $("imgSizeVal");
 
     const ctx = drawingCanvas.getContext("2d");
 
@@ -682,27 +691,43 @@
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) return;
       const range = sel.getRangeAt(0);
-      if (range.collapsed && editor.contains(range.startContainer)) {
+      if (editor.contains(range.startContainer)) {
         savedSelection = range.cloneRange();
       }
     }
-    document.addEventListener("selectionchange", () => {
-      if (document.activeElement === editor) captureSelection();
-    });
+    document.addEventListener("selectionchange", captureSelection);
+    editor.addEventListener("click", captureSelection);
+    editor.addEventListener("keyup", captureSelection);
+    editor.addEventListener("mouseup", captureSelection);
+
+    // Insere um nó (imagem ou tabela) EXATAMENTE no ponto do cursor salvo
     function restoreAndInsert(html) {
       editor.focus();
-      const sel = window.getSelection();
+      let range = null;
       if (savedSelection && editor.contains(savedSelection.startContainer)) {
-        sel.removeAllRanges();
-        sel.addRange(savedSelection);
+        range = savedSelection.cloneRange();
       } else {
-        const range = document.createRange();
+        range = document.createRange();
         range.selectNodeContents(editor);
         range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
       }
-      document.execCommand("insertHTML", false, html);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      // Colapsar para o ponto de inserção (para o caso de haver seleção estendida)
+      range.collapse(true);
+
+      // Criar elemento real e inserir via insertNode (mais confiável)
+      const wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      const node = wrap.firstChild;
+      range.insertNode(node);
+      // colocar o cursor após o nó inserido
+      const after = document.createRange();
+      after.setStartAfter(node);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
       captureSelection();
       page().text = editor.innerHTML;
       saveState();
@@ -762,13 +787,23 @@
 
     // Selecionar imagem clicada dentro do editor
     let selectedImg = null;
-    editor.addEventListener("click", (e) => {
-      const img = e.target.closest ? e.target.closest("img") : null;
+    function clearImgSelection() {
+      if (selectedImg) selectedImg.classList.remove("selected");
+      selectedImg = null;
+      btnImgSize.classList.add("hidden");
+      imgSizeBox.classList.add("hidden");
+    }
+    function selectImg(img) {
       if (selectedImg) selectedImg.classList.remove("selected");
       selectedImg = img;
       if (selectedImg) {
         selectedImg.classList.add("selected");
         btnImgSize.classList.remove("hidden");
+        const w = Math.round(selectedImg.getBoundingClientRect().width);
+        imgSizeSlider.value = Math.max(40, Math.min(900, w));
+        imgSizeVal.textContent = imgSizeSlider.value;
+        imgSizeBox.classList.remove("hidden");
+        imgSizeBox.classList.add("flex");
         editor.focus();
         const sel = window.getSelection();
         const range = document.createRange();
@@ -777,21 +812,66 @@
         sel.addRange(range);
       } else {
         btnImgSize.classList.add("hidden");
+        imgSizeBox.classList.add("hidden");
+      }
+    }
+    editor.addEventListener("click", (e) => {
+      const img = e.target.closest ? e.target.closest("img") : null;
+      selectImg(img);
+    });
+
+    // Redimensionar pela barrinha (slider)
+    imgSizeSlider.addEventListener("input", () => {
+      if (!selectedImg) return;
+      const w = parseInt(imgSizeSlider.value, 10);
+      selectedImg.style.width = w + "px";
+      selectedImg.style.height = "auto";
+      imgSizeVal.textContent = w;
+    });
+    imgSizeSlider.addEventListener("change", () => {
+      if (!selectedImg) return;
+      page().text = editor.innerHTML;
+      saveState();
+    });
+
+    // Redimensionar arrastando na própria imagem (canto inferior direito)
+    function applySizingHandle(ev) {
+      const img = ev.target.closest ? ev.target.closest("img") : null;
+      if (!img) return;
+      const startX = ev.clientX;
+      const startW = img.getBoundingClientRect().width;
+      const move = (e) => {
+        const useGlobal = window.getSelection() && window.getSelection().rangeCount;
+        ev.preventDefault();
+        const delta = e.clientX - startX;
+        const nw = Math.max(40, startW + delta);
+        img.style.width = nw + "px";
+        img.style.height = "auto";
+        imgSizeSlider.value = Math.round(nw);
+        imgSizeVal.textContent = Math.round(nw);
+      };
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        page().text = editor.innerHTML;
+        saveState();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    }
+    editor.addEventListener("mousedown", (e) => {
+      const handle = e.target.closest ? e.target.closest("img") : null;
+      if (handle && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        applySizingHandle(e);
       }
     });
 
-    // Redimensionar a imagem selecionada
+    // Atalhos: manter visível via botão (toggle do painel de tamanho)
     btnImgSize.addEventListener("click", () => {
       if (!selectedImg) { alert("Clique em uma imagem para selecioná-la e depois redimensione."); return; }
-      const current = selectedImg.style.width || (selectedImg.getBoundingClientRect().width) + "px";
-      const val = prompt("Largura da imagem (px) — ex.: 150, 300, 600:", current.replace("px", ""));
-      if (val === null) return;
-      const w = parseInt(val, 10);
-      if (isNaN(w) || w <= 0) return;
-      selectedImg.style.width = w + "px";
-      selectedImg.style.height = "auto";
-      page().text = editor.innerHTML;
-      saveState();
+      imgSizeBox.classList.toggle("hidden");
+      imgSizeBox.classList.toggle("flex");
     });
 
     document.addEventListener("keydown", (e) => {
@@ -799,14 +879,13 @@
         if (selectedImg && window.getSelection().isCollapsed && editor.contains(selectedImg)) {
           e.preventDefault();
           selectedImg.remove();
-          selectedImg = null;
-          btnImgSize.classList.add("hidden");
+          clearImgSelection();
           page().text = editor.innerHTML;
           saveState();
         }
       }
       if (e.key === "Escape") {
-        if (selectedImg) { selectedImg.classList.remove("selected"); selectedImg = null; btnImgSize.classList.add("hidden"); }
+        clearImgSelection();
       }
     });
 

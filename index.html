@@ -29,6 +29,13 @@
     #drawerBackdrop { transition: opacity 0.2s ease; }
     #editor img { display: inline-block; max-width: 100%; height: auto; border-radius: 6px; margin: 4px; vertical-align: middle; cursor: pointer; }
     #editor img.selected { outline: 3px solid #3b82f6; outline-offset: 2px; }
+    #imgResizeHandle {
+      position: absolute; width: 18px; height: 18px; box-sizing: border-box;
+      background: #3b82f6; border: 2px solid #fff; border-radius: 50%;
+      box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: nwse-resize; z-index: 50;
+      transform: translate(50%, 50%);
+    }
+    #imgResizeHandle.hidden-h { display: none; }
     #editor table { border-collapse: collapse; margin: 6px 0; }
     #editor table td, #editor table th { border: 1px solid #d1d5db; padding: 4px 8px; }
   </style>
@@ -831,6 +838,7 @@
       selectedImg = null;
       btnImgSize.classList.add("hidden");
       imgSizeBox.classList.add("hidden");
+      if (typeof imgHandle !== "undefined") imgHandle.classList.add("hidden-h");
     }
     function selectImg(img) {
       if (selectedImg) selectedImg.classList.remove("selected");
@@ -843,6 +851,7 @@
         imgSizeVal.textContent = imgSizeSlider.value;
         imgSizeBox.classList.remove("hidden");
         imgSizeBox.classList.add("flex");
+        if (typeof imgHandle !== "undefined") updateHandlePos();
         editor.focus();
         const sel = window.getSelection();
         const range = document.createRange();
@@ -852,6 +861,7 @@
       } else {
         btnImgSize.classList.add("hidden");
         imgSizeBox.classList.add("hidden");
+        if (typeof imgHandle !== "undefined") imgHandle.classList.add("hidden-h");
       }
     }
     editor.addEventListener("click", (e) => {
@@ -873,17 +883,36 @@
       saveState();
     });
 
-    // Redimensionar arrastando na própria imagem (canto inferior direito)
-    function applySizingHandle(ev) {
-      const img = ev.target.closest ? ev.target.closest("img") : null;
+    // Alça de redimensionamento visível no canto inferior direito da imagem
+    const imgHandle = document.createElement("div");
+    imgHandle.id = "imgResizeHandle";
+    imgHandle.title = "Arraste para redimensionar";
+    imgHandle.classList.add("hidden-h");
+    document.body.appendChild(imgHandle);
+
+    // atualizar posição da alça sobre o canto da imagem selecionada
+    function updateHandlePos() {
+      if (!selectedImg || !editor.contains(selectedImg)) { imgHandle.classList.add("hidden-h"); return; }
+      imgHandle.classList.remove("hidden-h");
+      const r = selectedImg.getBoundingClientRect();
+      // posiciona pelo canto inferior direito (absolute no body)
+      imgHandle.style.left = (r.right - 4) + "px";
+      imgHandle.style.top = (r.bottom - 4) + "px";
+    }
+    window.addEventListener("scroll", updateHandlePos, true);
+    window.addEventListener("resize", updateHandlePos);
+    document.addEventListener("mousemove", updateHandlePos);
+
+    function startResize(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const img = selectedImg;
       if (!img) return;
-      const startX = ev.clientX;
+      const startX = e.clientX;
       const startW = img.getBoundingClientRect().width;
-      const move = (e) => {
-        const useGlobal = window.getSelection() && window.getSelection().rangeCount;
+      const move = (ev) => {
         ev.preventDefault();
-        const delta = e.clientX - startX;
-        const nw = Math.max(40, startW + delta);
+        const nw = Math.max(40, Math.min(1600, startW + (ev.clientX - startX)));
         img.style.width = nw + "px";
         img.style.height = "auto";
         imgSizeSlider.value = Math.round(nw);
@@ -898,13 +927,7 @@
       document.addEventListener("mousemove", move);
       document.addEventListener("mouseup", up);
     }
-    editor.addEventListener("mousedown", (e) => {
-      const handle = e.target.closest ? e.target.closest("img") : null;
-      if (handle && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        applySizingHandle(e);
-      }
-    });
+    imgHandle.addEventListener("mousedown", startResize);
 
     // Atalhos: manter visível via botão (toggle do painel de tamanho)
     btnImgSize.addEventListener("click", () => {

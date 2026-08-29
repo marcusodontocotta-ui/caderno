@@ -27,6 +27,9 @@
     #drawer { transition: transform 0.25s ease; }
     #drawer.open { transform: translateX(0); }
     #drawerBackdrop { transition: opacity 0.2s ease; }
+    #editor img { max-width: 100%; height: auto; border-radius: 6px; margin: 4px 0; }
+    #editor table { border-collapse: collapse; margin: 6px 0; }
+    #editor table td, #editor table th { border: 1px solid #d1d5db; padding: 4px 8px; }
   </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -97,6 +100,9 @@
         <button id="btnAlignRight" title="Alinhar à direita" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡→</button>
         <button id="btnAlignJustify" title="Justificar" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100">≡⇔</button>
         <span class="w-px h-5 bg-gray-300 mx-1"></span>
+        <label title="Inserir imagem no cursor" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 cursor-pointer">🖼 Imagem
+          <input id="imgInput" type="file" accept="image/*" class="hidden" />
+        </label>
         <button id="btnExportText" class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 ml-auto">⬇ Exportar texto</button>
       </div>
       <div class="shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
@@ -683,6 +689,44 @@
     $("btnAlignCenter").addEventListener("click", () => execAlign("justifyCenter"));
     $("btnAlignRight").addEventListener("click", () => execAlign("justifyRight"));
     $("btnAlignJustify").addEventListener("click", () => execAlign("justifyFull"));
+
+    // Inserir imagem no cursor do editor
+    $("imgInput").addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        editor.focus();
+        document.execCommand("insertHTML", false, '<img src="' + ev.target.result + '" alt="imagem" />');
+        page().text = editor.innerHTML;
+        saveState();
+      };
+      reader.readAsDataURL(f);
+    });
+
+    // Colar imagem/tabela de planilha dentro do editor
+    editor.addEventListener("paste", (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf("image") === 0) {
+          e.preventDefault();
+          const blob = items[i].getAsFile();
+          if (!blob) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            editor.focus();
+            document.execCommand("insertHTML", false, '<img src="' + ev.target.result + '" alt="colada" />');
+            page().text = editor.innerHTML;
+            saveState();
+          };
+          reader.readAsDataURL(blob);
+          return;
+        }
+      }
+      editor.addEventListener("blur", () => { page().text = editor.innerHTML; saveState(); }, { once: true });
+    });
     $("btnHighlight").addEventListener("click", () => {
       editor.focus();
       const sel = window.getSelection();

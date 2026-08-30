@@ -1656,6 +1656,70 @@
       renderPremium();
     }
 
+    const PREMIUM_BASE_PRICE = 4.90;
+    let cupomAplicado = null; // { codigo, percentual, desconto, valor_final }
+
+    function fmtBr(v) { return "R$ " + Number(v).toFixed(2).replace(".", ","); }
+
+    function renderPremiumPrice() {
+      const disp = $("premiumPriceDisplay");
+      if (!disp) return;
+      if (cupomAplicado) {
+        disp.innerHTML = "<s class=\"text-gray-400\">" + fmtBr(PREMIUM_BASE_PRICE) + "/mês</s> <strong class=\"text-green-700\">" + fmtBr(cupomAplicado.valor_final) + "/mês</strong>";
+      } else {
+        disp.textContent = "R$ " + PREMIUM_BASE_PRICE.toFixed(2).replace(".", ",") + "/mês";
+      }
+    }
+
+    function setCupomStatus(msg, ok) {
+      const st = $("cupomStatus");
+      if (!st) return;
+      st.textContent = msg;
+      st.className = "text-xs min-h-[1rem] mb-3 " + (ok ? "text-green-700" : "text-red-600");
+    }
+
+    async function aplicarCupom() {
+      const input = $("cupomInput");
+      const codigo = (input && input.value || "").trim();
+      if (!codigo) { setCupomStatus("Digite um código de cupom.", false); return; }
+      const auth = getAuth();
+      if (!auth || !auth.token) { setCupomStatus("Entre com sua conta para usar um cupom.", false); return; }
+      try {
+        const r = await api("/billing/cupom/validar?codigo=" + encodeURIComponent(codigo), { method: "GET" });
+        if (r.status === 200 && r.body && r.body.valor_final) {
+          cupomAplicado = r.body;
+          setCupomStatus("Cupom aplicado: " + cupomAplicado.percentual + "% de desconto = " + fmtBr(cupomAplicado.valor_final) + "/mês.", true);
+          renderPremiumPrice();
+        } else {
+          cupomAplicado = null;
+          setCupomStatus((r.body && r.body.detail) || "Cupom inválido ou inativo.", false);
+          renderPremiumPrice();
+        }
+      } catch (e) {
+        setCupomStatus("Erro ao validar cupom.", false);
+      }
+    }
+
+    function openPremiumModal() {
+      if (isPremiumActive()) return;
+      const auth = getAuth();
+      if (!auth || !auth.token) {
+        alert("Entre com sua conta na nuvem primeiro para assinar o premium.");
+        return;
+      }
+      cupomAplicado = null;
+      $("cupomInput").value = "";
+      setCupomStatus("Tem um cupom? Digite acima para ver o desconto. (Ex.: CADERNO50, CADERNO80)", false);
+      renderPremiumPrice();
+      $("premiumModal").classList.remove("hidden");
+      $("premiumModalBackdrop").classList.remove("hidden");
+    }
+
+    function closePremiumModal() {
+      $("premiumModal").classList.add("hidden");
+      $("premiumModalBackdrop").classList.add("hidden");
+    }
+
     async function subscribePremium() {
       if (isPremiumActive()) return;
       const auth = getAuth();
@@ -1663,9 +1727,10 @@
         alert("Entre com sua conta na nuvem primeiro para assinar o premium.");
         return;
       }
-      alert("Você será direcionado ao pagamento do Mercado Pago para ativar o Premium (R$ 4,90/mês).");
+      const body = {};
+      if (cupomAplicado) body.cupom = cupomAplicado.codigo;
       try {
-        const r = await api("/billing/premium", { method: "POST" });
+        const r = await api("/billing/premium", { method: "POST", body: JSON.stringify(body) });
         if (r.status === 200 && r.body.init_point) {
           window.location.href = r.body.init_point;
         } else {
@@ -1675,11 +1740,17 @@
         alert("Erro ao gerar o checkout.");
       }
     }
-    $("btnPremium").addEventListener("click", subscribePremium);
+    $("btnPremium").addEventListener("click", openPremiumModal);
     const _premBadge = $("premiumBadge");
-    if (_premBadge) _premBadge.addEventListener("click", subscribePremium);
+    if (_premBadge) _premBadge.addEventListener("click", openPremiumModal);
     const _premBadgeDrawer = $("premiumBadgeDrawer");
-    if (_premBadgeDrawer) _premBadgeDrawer.addEventListener("click", subscribePremium);
+    if (_premBadgeDrawer) _premBadgeDrawer.addEventListener("click", openPremiumModal);
+    $("btnAplicarCupom").addEventListener("click", aplicarCupom);
+    $("cupomInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aplicarCupom(); } });
+    $("btnConfirmarPremium").addEventListener("click", () => { subscribePremium(); });
+    $("btnCancelPremium").addEventListener("click", closePremiumModal);
+    $("btnClosePremium").addEventListener("click", closePremiumModal);
+    $("premiumModal").addEventListener("click", (e) => { if (e.target.id === "premiumModal") closePremiumModal(); });
 
     function cloudNotebooks() {
       return state.notebooks.map((n) => ({
@@ -1774,5 +1845,30 @@
     applyLayout();
     applyTab();
   </script>
+
+  <!-- Modal de assinatura Premium com cupom -->
+  <div id="premiumModalBackdrop" class="fixed inset-0 bg-black/40 z-[60] hidden flex items-center justify-center p-4"></div>
+  <div id="premiumModal" class="hidden fixed z-[70] inset-0 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="text-lg font-bold text-gray-800">⭐ Assinar Premium</h3>
+        <button id="btnClosePremium" class="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
+      </div>
+      <p class="text-sm text-gray-600 mb-2">Cadernos ilimitados na nuvem por <strong id="premiumPriceDisplay">R$ 4,90/mês</strong>.</p>
+      <div class="flex gap-2 mb-1">
+        <input id="cupomInput" type="text" placeholder="Cupom de desconto (opcional)" maxlength="30"
+               class="flex-1 text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+        <button id="btnAplicarCupom" class="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-2 rounded transition">Aplicar</button>
+      </div>
+      <p id="cupomStatus" class="text-xs min-h-[1rem] mb-3"></p>
+      <div class="flex gap-2">
+        <button id="btnConfirmarPremium" class="flex-1 text-sm bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-semibold px-3 py-2.5 rounded transition">
+          Continuar para o pagamento
+        </button>
+        <button id="btnCancelPremium" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium px-4 py-2.5 rounded transition">Cancelar</button>
+      </div>
+      <p class="text-[11px] text-gray-400 mt-3">Pagamento seguro via Mercado Pago (assinatura recorrente mensal). Ao continuar você concorda com os termos.</p>
+    </div>
+  </div>
 </body>
 </html>

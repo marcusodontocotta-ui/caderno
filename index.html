@@ -76,6 +76,9 @@
       <button id="btnPremium" title="Assinar o plano Premium (R$ 4,90/mês)" class="text-xs bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-semibold px-3 py-1.5 rounded transition">
         ⭐ Premium
       </button>
+      <span id="premiumBadge" title="Assine o Premium para criar vários cadernos" class="hidden text-xs bg-yellow-100 text-yellow-900 border border-yellow-300 rounded px-2 py-1 cursor-pointer hover:bg-yellow-200 transition">
+        ⭐ Assine Premium
+      </span>
       <button id="btnAccount" title="Entrar e sincronizar na nuvem" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-1.5 rounded transition">
         👤 Entrar
       </button>
@@ -91,6 +94,9 @@
     </div>
     <div id="notebookList" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
     <div class="p-3 border-t border-gray-200 shrink-0">
+      <div id="premiumBadgeDrawer" title="Assine o Premium para criar vários cadernos" class="hidden mb-2 text-xs bg-yellow-100 text-yellow-900 border border-yellow-300 rounded px-2 py-1.5 cursor-pointer hover:bg-yellow-200 transition">
+        ⭐ Assine o Premium para criar vários cadernos (R$ 4,90/mês)
+      </div>
       <button id="btnNewNotebookDrawer" class="w-full text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-2 rounded transition">
         + Novo caderno
       </button>
@@ -1071,6 +1077,10 @@
       if (state.activePageIndex < notebook().pages.length - 1) { state.activePageIndex++; currentPdfDoc = null; saveState(); renderUI(); }
     });
     $("btnNewNotebook").addEventListener("click", () => {
+      if (billingStatus.confirmed && !billingStatus.is_premium) {
+        alert("Seu plano permite apenas 1 caderno. Assine o Premium (R$ 4,90/mês) para criar vários cadernos.");
+        return;
+      }
       const name = prompt("Nome do novo caderno:", "Novo Caderno");
       if (name === null) return;
       const nb = { id: "nb" + Date.now(), name: name, pages: [defaultPage()] };
@@ -1101,6 +1111,10 @@
     $("btnCloseDrawer").addEventListener("click", closeDrawer);
     drawerBackdrop.addEventListener("click", closeDrawer);
     $("btnNewNotebookDrawer").addEventListener("click", () => {
+      if (billingStatus.confirmed && !billingStatus.is_premium) {
+        alert("Seu plano permite apenas 1 caderno. Assine o Premium (R$ 4,90/mês) para criar vários cadernos.");
+        return;
+      }
       const name = prompt("Nome do novo caderno:", "Novo Caderno");
       if (name === null) return;
       const nb = { id: "nb" + Date.now(), name: name, pages: [defaultPage()] };
@@ -1506,6 +1520,7 @@
       if (a) localStorage.setItem(AUTH_KEY, JSON.stringify(a));
       else localStorage.removeItem(AUTH_KEY);
       renderAccountUi();
+      refreshPremiumStatus();
     }
 
     async function api(path, opts) {
@@ -1562,10 +1577,78 @@
 
     function startCloudSync() {
       if (cloudTimer) clearInterval(cloudTimer);
-      cloudTimer = setInterval(syncCloud, 15000);
+      cloudTimer = setInterval(() => { syncCloud(); refreshPremiumStatus(); }, 15000);
       syncCloud();
     }
-    $("btnPremium").addEventListener("click", async () => {
+    let billingStatus = { is_premium: false, premium_until: null, checked: false, confirmed: false };
+
+    function isPremiumActive() {
+      return !!(billingStatus && billingStatus.confirmed && billingStatus.is_premium === true);
+    }
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso || "";
+        return d.toLocaleDateString("pt-BR");
+      } catch (e) { return iso || ""; }
+    }
+    function renderPremium() {
+      const btn = $("btnPremium");
+      const badge = $("premiumBadge");
+      const badgeDrawer = $("premiumBadgeDrawer");
+      const auth = getAuth();
+      const isPremium = isPremiumActive();
+      const showHint = !!(auth && auth.token) && !isPremium && billingStatus.confirmed && !billingStatus.is_premium;
+      if (badge) badge.classList.toggle("hidden", !showHint);
+      if (badgeDrawer) badgeDrawer.classList.toggle("hidden", !showHint);
+      if (isPremium) {
+        btn.textContent = "⭐ Premium (ativo)";
+        btn.title = "Plano Premium ativo" + (billingStatus.premium_until ? " — vigência até " + formatDate(billingStatus.premium_until) : "");
+        btn.disabled = true;
+        btn.classList.add("opacity-60", "cursor-default");
+        return;
+      }
+      btn.disabled = false;
+      btn.classList.remove("opacity-60", "cursor-default");
+      if (!auth || !auth.token) {
+        btn.textContent = "⭐ Entrar para assinar";
+        btn.title = "Entre na sua conta na nuvem para assinar o Premium";
+      } else {
+        btn.textContent = "⭐ Assinar Premium";
+        btn.title = "Assinar o plano Premium (R$ 4,90/mês)";
+      }
+    }
+
+    // Consulta o status Premium no backend. É apenas um reforço da UI:
+    // em caso de erro/offline o app continua funcionando localmente.
+    async function refreshPremiumStatus() {
+      const auth = getAuth();
+      if (!auth || !auth.token) {
+        billingStatus = { is_premium: false, premium_until: null, checked: false, confirmed: false };
+      } else {
+        try {
+          const r = await api("/billing/status", { method: "GET" });
+          if (r.status === 200 && r.body && typeof r.body.is_premium === "boolean") {
+            billingStatus = {
+              is_premium: r.body.is_premium,
+              premium_until: r.body.premium_until || null,
+              checked: true,
+              confirmed: true,
+            };
+          } else {
+            billingStatus.checked = true;
+            billingStatus.confirmed = false;
+          }
+        } catch (e) {
+          billingStatus.checked = true;
+          billingStatus.confirmed = false;
+        }
+      }
+      renderPremium();
+    }
+
+    async function subscribePremium() {
+      if (isPremiumActive()) return;
       const auth = getAuth();
       if (!auth || !auth.token) {
         alert("Entre com sua conta na nuvem primeiro para assinar o premium.");
@@ -1582,7 +1665,12 @@
       } catch (e) {
         alert("Erro ao gerar o checkout.");
       }
-    });
+    }
+    $("btnPremium").addEventListener("click", subscribePremium);
+    const _premBadge = $("premiumBadge");
+    if (_premBadge) _premBadge.addEventListener("click", subscribePremium);
+    const _premBadgeDrawer = $("premiumBadgeDrawer");
+    if (_premBadgeDrawer) _premBadgeDrawer.addEventListener("click", subscribePremium);
 
     function cloudNotebooks() {
       return state.notebooks.map((n) => ({
@@ -1662,6 +1750,7 @@
     renderAccountUi();
     const _auth = getAuth();
     if (_auth && _auth.token) startCloudSync();
+    refreshPremiumStatus();
 
     /* =========================================================
        Bootstrap

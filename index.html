@@ -72,6 +72,13 @@
       <button id="btnNextPage" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded transition">
         Próxima ›
       </button>
+      <span class="w-px h-5 bg-gray-300"></span>
+      <button id="btnPremium" title="Assinar o plano Premium (R$ 4,90/mês)" class="text-xs bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-semibold px-3 py-1.5 rounded transition">
+        ⭐ Premium
+      </button>
+      <button id="btnAccount" title="Entrar e sincronizar na nuvem" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-1.5 rounded transition">
+        👤 Entrar
+      </button>
     </div>
   </header>
 
@@ -1484,6 +1491,177 @@
       page().fontSize = editor.style.fontSize;
     }
     if (page().fontSize) editor.style.fontSize = page().fontSize;
+
+    /* =========================================================
+       Conta / Nuvem / Premium (backend caderno-app)
+       ========================================================= */
+    const API_BASE = "https://caderno-app.onrender.com";
+    const AUTH_KEY = "cadernoEstudos.auth";   // { token, email }
+    let cloudTimer = null;
+
+    function getAuth() {
+      try { return JSON.parse(localStorage.getItem(AUTH_KEY)) || null; } catch (e) { return null; }
+    }
+    function setAuth(a) {
+      if (a) localStorage.setItem(AUTH_KEY, JSON.stringify(a));
+      else localStorage.removeItem(AUTH_KEY);
+      renderAccountUi();
+    }
+
+    async function api(path, opts) {
+      const auth = getAuth();
+      const headers = Object.assign({ "Content-Type": "application/json" }, (opts && opts.headers) || {});
+      if (auth && auth.token) headers.Authorization = "Bearer " + auth.token;
+      const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
+      let body = null;
+      try { body = await res.json(); } catch (e) {}
+      return { status: res.status, body };
+    }
+
+    function renderAccountUi() {
+      const btn = $("btnAccount");
+      const auth = getAuth();
+      if (auth && auth.email) {
+        btn.textContent = "👤 Sair (" + auth.email + ")";
+        btn.title = "Encerrar sessão";
+      } else {
+        btn.textContent = "👤 Entrar";
+        btn.title = "Entrar e sincronizar na nuvem";
+      }
+    }
+    $("btnAccount").addEventListener("click", async () => {
+      const auth = getAuth();
+      if (auth && auth.email) {
+        setAuth(null);
+        clearInterval(cloudTimer); cloudTimer = null;
+        alert("Sessão encerrada. Os dados continuam salvos localmente neste navegador.");
+        return;
+      }
+      const email = prompt("E-mail para sua conta na nuvem:");
+      if (!email) return;
+      const mailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+      if (!mailOk) { alert("E-mail inválido."); return; }
+      const password = prompt("Senha (mínimo 6 caracteres):");
+      if (!password || password.length < 6) { alert("Senha deve ter no mínimo 6 caracteres."); return; }
+      try {
+        let r = await api("/auth/login", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+        if (r.status === 401) {
+          r = await api("/auth/register", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+        }
+        if ((r.status !== 200 && r.status !== 201) || !r.body.access_token) {
+          alert("Não foi possível entrar: " + (r.body && r.body.detail ? r.body.detail : "erro" ));
+          return;
+        }
+        setAuth({ token: r.body.access_token, email: r.body.email });
+        alert("Conta conectada! Suas anotações serão sincronizadas na nuvem.");
+        startCloudSync();
+      } catch (e) {
+        alert("Erro de conexão com o servidor.");
+      }
+    });
+
+    function startCloudSync() {
+      if (cloudTimer) clearInterval(cloudTimer);
+      cloudTimer = setInterval(syncCloud, 15000);
+      syncCloud();
+    }
+    $("btnPremium").addEventListener("click", async () => {
+      const auth = getAuth();
+      if (!auth || !auth.token) {
+        alert("Entre com sua conta na nuvem primeiro para assinar o premium.");
+        return;
+      }
+      alert("Você será direcionado ao pagamento do Mercado Pago para ativar o Premium (R$ 4,90/mês).");
+      try {
+        const r = await api("/billing/premium", { method: "POST" });
+        if (r.status === 200 && r.body.init_point) {
+          window.location.href = r.body.init_point;
+        } else {
+          alert("Não foi possível gerar o checkout: " + (r.body && r.body.detail ? r.body.detail : "erro"));
+        }
+      } catch (e) {
+        alert("Erro ao gerar o checkout.");
+      }
+    });
+
+    function cloudNotebooks() {
+      return state.notebooks.map((n) => ({
+        id: n.id,
+        name: n.name,
+        pages: n.pages.map((p) => ({ text: p.text || "" })),
+      }));
+    }
+
+    // Mapeia um id local (ex: "default") para o id numérico no backend.
+    const CLOUD_MAP_KEY = "cadernoEstudos.cloudMap"; // { [localId]: remoteId }
+    function getCloudMap() {
+      try { return JSON.parse(localStorage.getItem(CLOUD_MAP_KEY)) || {}; } catch (e) { return {}; }
+    }
+    function saveCloudMap(m) {
+      localStorage.setItem(CLOUD_MAP_KEY, JSON.stringify(m));
+    }
+
+    // Sincroniza os cadernos (texto das páginas) com a nuvem.
+    async function syncCloud() {
+      const auth = getAuth();
+      if (!auth || !auth.token) return;
+      try {
+        const map = getCloudMap();
+        const list = await api("/notebooks", { method: "GET" });
+        if (list.status !== 200) return;
+        const remote = list.body;
+        const remoteByNum = {};
+        remote.forEach((x) => { remoteByNum[String(x.id)] = x; });
+
+        for (const nb of cloudNotebooks()) {
+          let remoteId = map[String(nb.id)];
+          let inRemote = remoteId ? remoteByNum[String(remoteId)] : null;
+
+          if (!inRemote) {
+            const created = await api("/notebooks", { method: "POST", body: JSON.stringify({ name: nb.name }) });
+            if (created.status === 200 || created.status === 201) {
+              remoteId = created.body.id;
+              map[String(nb.id)] = remoteId;
+              saveCloudMap(map);
+              inRemote = remoteByNum[String(remoteId)] = created.body;
+            }
+          }
+          if (!inRemote) continue;
+
+          const upToDate = nb.pages.every((p, i) => {
+            const rp = inRemote.pages[i];
+            return rp && rp.text === (p.text || "");
+          }) && inRemote.pages.length === nb.pages.length;
+
+          if (upToDate) {
+            // ordena página novo caso o remoto não tenha todas
+            if (nb.pages.length > inRemote.pages.length) {
+              for (let i = inRemote.pages.length; i < nb.pages.length; i++) {
+                await api("/notebooks/" + inRemote.id + "/pages", { method: "POST", body: JSON.stringify({ text: nb.pages[i].text, position: i }) });
+              }
+            }
+            continue;
+          }
+
+          for (let i = 0; i < nb.pages.length; i++) {
+            const rp = inRemote.pages[i];
+            if (rp && rp.id) {
+              await api("/notebooks/" + inRemote.id + "/pages/" + rp.id, { method: "PUT", body: JSON.stringify({ text: nb.pages[i].text }) });
+            } else {
+              await api("/notebooks/" + inRemote.id + "/pages", { method: "POST", body: JSON.stringify({ text: nb.pages[i].text, position: i }) });
+            }
+            // atualiza a referência local do backup
+            inRemote.pages[i] = Object.assign({}, inRemote.pages[i], { text: nb.pages[i].text });
+          }
+        }
+      } catch (e) {
+        // silencioso: tenta de novo no próximo ciclo
+      }
+    }
+
+    renderAccountUi();
+    const _auth = getAuth();
+    if (_auth && _auth.token) startCloudSync();
 
     /* =========================================================
        Bootstrap

@@ -231,6 +231,15 @@
     </section>
   </main>
 
+  <!-- Rodapé -->
+  <footer class="shrink-0 bg-white border-t border-gray-200 px-4 py-2 flex items-center justify-center gap-4 text-xs text-gray-500">
+    <span>&copy; <span id="footerYear"></span> Caderno de Estudos</span>
+    <span class="w-px h-3 bg-gray-300"></span>
+    <a href="termos.html" class="hover:text-blue-600 hover:underline transition" title="Termos de Uso e Política de Privacidade">Termos de Uso</a>
+    <span class="w-px h-3 bg-gray-300"></span>
+    <a href="termos.html" class="hover:text-blue-600 hover:underline transition" title="Termos de Uso e Política de Privacidade">Política de Privacidade</a>
+  </footer>
+
   <script>
     "use strict";
     /* =========================================================
@@ -1756,6 +1765,8 @@
        Bootstrap
        ========================================================= */
     loadState();
+    const footerYear = $("footerYear");
+    if (footerYear) footerYear.textContent = new Date().getFullYear();
     // configurar controles da Bíblia com o estado carregado
     $("bibleVersion").value = state.bible.version;
     $("chkHebrew").checked = state.bible.hebrew;

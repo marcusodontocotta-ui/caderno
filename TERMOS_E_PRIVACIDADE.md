@@ -7,7 +7,7 @@
 - **Backend/API:** https://caderno-app.onrender.com
 - **Pagamentos:** Mercado Pago (Checkout Pro / assinaturas — preapproval).
 - **Valor da assinatura:** R$ 4,90/mês.
-- **Última atualização:** agosto de 2026.
+- **Última atualização:** setembro de 2026.
 
 ---
 
@@ -173,98 +173,42 @@ Para questões de privacidade, use o mesmo canal da Parte 1, seção 11. Em caso
 
 ---
 
-## Parte 3 — Apêndice técnico: fluxo de cancelamento/reembolso no Mercado Pago e melhoria necessária no backend
+## Parte 3 — Apêndice técnico: fluxo de cancelamento/reembolso no Mercado Pago
 
 > **Para a equipe técnica.** Não é parte do documento legal usuário/documento de Termos; serve como referência de implementação.
 
 ### 3.1 Como funciona a assinatura (preapproval) no Mercado Pago
 
-- O app cria um **preapproval** (assinatura recorrente mensal, valor R$ 4,90) com `external_reference = caderno:{user_id}` (`billing.py:27-39`).
-- O Mercado Pago envia **webhooks** para `POST /billing/webhook` (`main.py:228-259`) com `type=preapproval` (eventos da assinatura) ou `type=payment` (eventos de cada cobrança).
-- Estados possíveis do preapproval: `pending`, `authorized`, `paused`, `cancelled` (e, em caso de encerramento por não renovação, o status tende a `cancelled`/`finished` após as tentativas de cobrança).
+- O app cria um **preapproval** (assinatura recorrente mensal, valor R$ 4,90) com `external_reference = caderno:{user_id}` (`billing.py:create_preapproval`).
+- O Mercado Pago envia **webhooks** para `POST /billing/webhook` (`main.py`) com `type=preapproval` (eventos da assinatura) ou `type=payment` (eventos de cada cobrança).
+- Estados possíveis do preapproval: `pending`, `authorized`, `active`, `paused`, `cancelled` (e, em caso de encerramento por não renovação, `finished`).
 
 ### 3.2 Onde o usuário cancela
 
 1. O usuário entra no **Mercado Pago** (conta do pagante).
 2. Menu **Minha conta → Assinaturas** (área de assinaturas/suscripciones da conta Mercado Pago).
 3. Cancela a assinatura "Caderno de Estudos Premium". A renovação recorrente é interrompida.
-4. O Mercado Pago emite webhook `type=preapproval` com `data.id` = `preapproval_id` e o(s) status de cancelamento/pausa.
+4. O Mercado Pago emite webhook `type=preapproval` com `data.id` = `preapproval_id` e status de cancelamento/pausa.
 
 ### 3.3 Reembolso
 
 - **Direito de arrependimento (7 dias, CDC art. 49):** reembolso integral do ciclo pago, processado pelo Mercado Pago (painel do vendedor em **Pagamentos/Compras** ou via API `POST /v1/payments/{payment_id}/refunds`). Não existe reembolso "da assinatura inteira" — o estorno é **por cobrança (payment)**.
 - A cada reembolso, o Mercado Pago envia webhook `type=payment` com `status=refunded` (ou `partially_refunded`).
 
-### 3.4 Análise atual do backend (resposta objetiva)
+### 3.4 Comportamento ATUAL do backend (o que está implementado)
 
-**Não — o premium NÃO é desativado automaticamente ao cancelar/não renovar a assinatura.** A lógica existente é apenas de **ativação**, e o flag nunca é rebaixado:
+**Sim — o premium é desativado em cancelamento/pausa/não renovação/cobrança estornada:**
 
-- `main.py:240-249` — o webhook `type=preapproval` só trata os status **`authorized`/`active`**. Se o Mercado Pago notificar `cancelled`, `paused` ou `finished`, o bloco é ignorado (nenhuma ação).
-- `main.py:250-256` — o webhook `type=payment` só trata `status == "approved"` (ativa). `refunded`/`chargeback` não são tratados.
-- `billing.py:60-88` — `activate_user_premium` apenas seta `is_premium = True` e soma 30 dias; **não existe função de desativação**.
-- `grep` em todo o backend: `is_premium` nunca recebe `False` em lugar nenhum do código, e `premium_until` é apenas gravado (`billing.py:66-67`) e exposto em `GET /billing/status` (`main.py:262-267`) — **nunca é verificado para liberar/restringir**, nem mesmo a expiração.
-- `main.py:124-128` — o limite do plano gratuito (1 caderno) usa **apenas** `if not user.is_premium:`. Como `is_premium` nunca volta a `False`, **mesmo com assinatura cancelada/expirada, o usuário continua com cadernos ilimitados por tempo indeterminado.**
+- `billing.py:deactivate_user_premium(db, user_id, reason)` — desliga `is_premium` (e `premium_until`), marca a `Subscription` com o status (`cancelled`/`paused`/`refunded`/etc.) e grava.
+- `main.py` webhook `type=preapproval`:
+  - `authorized`/`active` ⇒ `activate_user_premium` (+30 dias);
+  - `cancelled`/`paused` ⇒ `deactivate_user_premium` (volta ao plano gratuito).
+- `main.py` webhook `type=payment`:
+  - `approved` ⇒ `activate_user_premium`;
+  - `refunded`/`chargeback`/`cancelled` ⇒ `deactivate_user_premium`.
+- **Webhook fail-closed:** sem `MP_WEBHOOK_SECRET` ⇒ `503`; assinatura `x-signature` inválida ⇒ `401`. Nenhum evento é aceito sem assinatura.
+- **Expiração:** `auth.py:get_current_user` verifica `premium_until` a cada requisição — se venceu, `is_premium` cai para `False` automaticamente (mesmo sem webhook).
+- **Limite do plano gratuito:** `main.py` `POST /notebooks` usa `user.is_premium` (que já chega rebaixado quando expirado/cancelado) — usuário gratuito fica limitado a 1 caderno.
+- Erros/respostas do Mercado Pago são **logados internamente** e devolvidos ao cliente como mensagem genérica (`billing.py`), evitando vazar detalhes da integração.
 
-**Impacto comercial:** assinantes que cancelam ou têm cobrança recusada **jamais** caem para o plano gratuito — hole crítico para o modelo de recorrência.
-
-### 3.5 Melhoria necessária (SUGERIDA — NÃO implementada)
-
-Trechos de referência para adicionar no backend quando a equipe estiver segura. Também vale **verificar `premium_until`** em `create_notebook` em vez de depender só do booleano.
-
-```python
-# billing.py — adicionar função de desativação
-def deactivate_user_premium(db: Session, user_id: int, preapproval_id: str) -> None:
-    """Desativa o premium (cancelamento/pausa/não renovação da assinatura)."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        return
-    user.is_premium = False
-    # mantém premium_until/mp_preapproval_id apenas p/ auditoria
-    for sub in db.query(Subscription).filter(Subscription.user_id == user_id).all():
-        sub.status = "cancelled"
-        sub.updated_at = datetime.utcnow()
-    db.commit()
-```
-
-```python
-# main.py — ajustar o webhook de preapproval para tratar cancelamento/pausa
-if type_ == "preapproval" and data_id:
-    pa = get_preapproval(str(data_id))
-    status = pa.get("status", "")
-    ext = pa.get("external_reference", "") or ""
-    if ext.startswith("caderno:"):
-        try:
-            user_id = int(ext.split(":")[1])
-        except (IndexError, ValueError):
-            return {"ok": True}
-        if status in ("authorized", "active"):
-            activate_user_premium(db, user_id, str(data_id))
-        elif status in ("cancelled", "paused", "finished"):
-            deactivate_user_premium(db, user_id, str(data_id))
-```
-
-```python
-# main.py — opcional: tratar reembolso/cobrança recusada no tipo payment
-elif type_ == "payment" and data_id:
-    p = get_payment(str(data_id))
-    preapproval_id = p.get("preapproval_id")
-    if preapproval_id:
-        for sub in db.query(Subscription).filter(Subscription.mp_preapproval_id == str(preapproval_id)).all():
-            if p.get("status") == "approved" and sub.user_id:
-                activate_user_premium(db, sub.user_id, str(preapproval_id))
-            elif p.get("status") in ("refunded", "chargeback") and sub.user_id:
-                deactivate_user_premium(db, sub.user_id, str(preapproval_id))
-```
-
-```python
-# main.py — endurecer o limite do plano gratuito verificando também a expiração
-@app.post("/notebooks")
-def create_notebook(...):
-    is_active = user.is_premium and (user.premium_until is None or user.premium_until > datetime.utcnow())
-    if not is_active:
-        count = db.query(Notebook).filter(Notebook.user_id == user.id).count()
-        if count >= 1:
-            raise HTTPException(status_code=402, detail="Plano gratuito limite de 1 caderno. Faca upgrade para premium.")
-```
-
-> **Recomendações adicionais:** (1) a data de vencimento também pode ser validada em `GET /billing/status` para o front exibir o estado real; (2) ao reativar, `activate_user_premium` já trata renovação corretamente (`billing.py:66`); (3) testar o cenário em sandbox do Mercado Pago antes de produção.
+> **Recomendações adicionais ao operar em produção:** (1) o front exibe `GET /billing/status` real (`is_premium`, `premium_until`); (2) ao reativar, `activate_user_premium` renova corretamente a partir de `premium_until` vigente; (3) testar cancelamento/reembolso em sandbox do MP antes de mexer em produção.

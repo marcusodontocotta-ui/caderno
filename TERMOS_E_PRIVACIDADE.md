@@ -57,7 +57,7 @@ O Serviço é fornecido "como está" ("as is") e "conforme disponível", sem gar
 
 - O cancelamento pode ser feito **a qualquer momento**, diretamente no **Mercado Pago**: área logada do cliente → **Minha conta → Assinaturas** (ou área de "suscripciones/assinaturas" do Mercado Pago).
 - Ao cancelar, **a cobrança recorrente é interrompida** para os próximos ciclos. **Não há reembolso automático** do valor já pago do ciclo em vigor (ver seção 7 abaixo).
-- O acesso premium permanece válido **até o fim do período já pago**; ao final, o usuário continua no plano gratuito com o recurso padrão (1 caderno).
+- Assim que o **Mercado Pago confirmar o cancelamento ou a pausa** da assinatura (ou a não renovação), o acesso premium é **desativado** e o usuário volta ao plano gratuito padrão (1 caderno). O Caderno de Estudos **não apaga automaticamente** os cadernos criados.
 - Recomendamos também entrar em contato com nosso suporte (Parte 1, seção 11) para maior segurança, embora o cancelamento direto no Mercado Pago seja o mecanismo oficial.
 
 ### 7. Reembolso
@@ -154,7 +154,7 @@ Você pode solicitar, a qualquer momento, mediante identificação:
 4. **Anonimização, bloqueio ou eliminação** de dados desnecessários ou excessivos;
 5. **Portabilidade** dos dados, quando aplicável;
 6. **Revogação do consentimento**, quando o tratamento se basear em consentimento;
-7. Tratar **otimização de conta** (extensões de limitação), inclusive a **exclusão da conta**.
+7. Tratar **pedidos relativos à própria conta**, inclusive a **exclusão da conta**.
 
 **Como exercer:** envie seu pedido pelo e-mail de contato (Parte 1, seção 11), com identificação suficiente (e-mail da conta e, se aplicável, comprovante). Responderemos em até **15 (quinze) dias** (prazo legal da LGPD). Poderemos pedir confirmação de identidade para proteger seus dados.
 

@@ -1657,3 +1657,42 @@
         });
       });
     }
+
+    /* =========================================================
+       Botão "Instalar app" (PWA)
+       ========================================================= */
+    const installBtn = $("btnInstall");
+    let deferredPrompt = null;
+
+    function showInstallButton() {
+      if (installBtn) installBtn.classList.remove("hidden");
+    }
+
+    function hideInstallButton() {
+      if (installBtn) installBtn.classList.add("hidden");
+    }
+
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      showInstallButton();
+    });
+
+    if (installBtn) {
+      installBtn.addEventListener("click", function () {
+        if (!deferredPrompt) {
+          alert("Para instalar: abra o menu do navegador (⋮) e toque em 'Adicionar à tela inicial'.");
+          return;
+        }
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function (choice) {
+          deferredPrompt = null;
+          hideInstallButton();
+        });
+      });
+    }
+
+    window.addEventListener("appinstalled", function () {
+      deferredPrompt = null;
+      hideInstallButton();
+    });

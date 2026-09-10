@@ -120,6 +120,13 @@
     ::-webkit-scrollbar-thumb:hover { background: #94a3b8; border: 2px solid transparent; background-clip: content-box; }
     ::-webkit-scrollbar-track { background: transparent; }
     #drawerBackdrop { background: rgba(15, 23, 42, .45); }
+    /* Mobile: garantir que editor e painel de anexos fiquem utilizáveis
+       (o flex-1 de 50% + overflow-hidden esmagava o editor para 0-19px). */
+    @media (max-width: 767px) {
+      body { overflow-y: auto; }
+      #mainLayout { overflow: visible; }
+      #editorPane, #rightPane { min-height: 50dvh; }
+    }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen flex flex-col">

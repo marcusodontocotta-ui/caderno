@@ -1646,3 +1646,14 @@
     renderUI();
     applyLayout();
     applyTab();
+
+    /* =========================================================
+       PWA: registrar service worker (permitido pela CSP: script-src 'self')
+       ========================================================= */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {
+          // silencioso: fallback para funcionamento normal
+        });
+      });
+    }

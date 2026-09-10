@@ -1008,7 +1008,7 @@
         const head = document.createElement("div");
         head.className = "flex items-center gap-2 px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100";
         head.innerHTML = '<span class="font-semibold text-gray-800 flex-1 truncate">' + escapeHtml(nb.name || "Sem nome") + "</span>" +
-          '<span class="text-xs text-gray-400 shrink-0">' + nb.pages.length + " pg</span>";
+          '<span class="text-xs text-gray-500 shrink-0">' + nb.pages.length + " pg</span>";
         const actions = document.createElement("div");
         actions.className = "flex items-center justify-end gap-1 px-2 pb-2";
         actions.innerHTML =
@@ -1220,7 +1220,7 @@
     function renderBibleChapter(bookData, chapterNum) {
       const content = $("bibleContent");
       const ch = bookData.chapters.find((c) => c.chapter === chapterNum);
-      if (!ch) { content.innerHTML = "<p class='text-gray-400'>Capítulo não encontrado.</p>"; return; }
+      if (!ch) { content.innerHTML = "<p class='text-gray-500'>Capítulo não encontrado.</p>"; return; }
 
       const saved = state.bible.saved[bibleSaveKey()];
       if (saved) {
@@ -1570,7 +1570,7 @@
       const disp = $("premiumPriceDisplay");
       if (!disp) return;
       if (cupomAplicado) {
-        disp.innerHTML = "<s class=\"text-gray-400\">" + fmtBr(PREMIUM_BASE_PRICE) + "/mês</s> <strong class=\"text-green-700\">" + fmtBr(cupomAplicado.valor_final) + "/mês</strong>";
+        disp.innerHTML = "<s class=\"text-gray-500\">" + fmtBr(PREMIUM_BASE_PRICE) + "/mês</s> <strong class=\"text-green-700\">" + fmtBr(cupomAplicado.valor_final) + "/mês</strong>";
       } else {
         disp.textContent = "R$ " + PREMIUM_BASE_PRICE.toFixed(2).replace(".", ",") + "/mês";
       }

@@ -92,15 +92,16 @@
     #imgResizeHandle {
       position: absolute; width: 18px; height: 18px; box-sizing: border-box;
       background: #3b82f6; border: 2px solid #fff; border-radius: 50%;
-      box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: nwse-resize; z-index: 50;
+      box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: nwse-resize; z-index: 55;
       transform: translate(50%, 50%);
     }
     #imgResizeHandle.hidden-h { display: none; }
     #editor table { border-collapse: collapse; margin: 6px 0; }
     #editor table td, #editor table th { border: 1px solid #d1d5db; padding: 4px 8px; }
     .update-banner {
-      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
-      z-index: 80; background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 10px;
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      z-index: 90; background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 10px;
       box-shadow: 0 4px 16px rgba(0,0,0,.25); display: flex; align-items: center; gap: 10px;
       font-size: 13px; max-width: 90vw;
     }
@@ -119,7 +120,7 @@
         id="notebookName"
         type="text"
         placeholder="Nome do caderno..."
-        class="text-sm text-gray-600 bg-gray-50 border border-gray-300 rounded px-2 py-1 w-48 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        class="text-sm text-gray-600 bg-gray-50 border border-gray-300 rounded px-2 py-1 w-48 max-w-[45vw] min-w-0 focus:outline-none focus:ring-2 focus:ring-blue-400"
       />
     </div>
     <div class="flex items-center gap-2 flex-wrap justify-end">
@@ -163,10 +164,10 @@
   <aside id="drawer" role="dialog" aria-modal="true" aria-label="Meus cadernos" class="fixed top-0 left-0 h-full w-80 max-w-[85vw] bg-white shadow-2xl z-50 flex flex-col -translate-x-full">
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
       <h2 class="font-bold text-gray-800">📚 Meus Cadernos</h2>
-      <button id="btnCloseDrawer" class="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
+      <button id="btnCloseDrawer" class="text-gray-500 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
     </div>
     <div id="notebookList" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
-    <div class="p-3 border-t border-gray-200 shrink-0">
+    <div class="p-3 border-t border-gray-200 shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
       <div id="premiumBadgeDrawer" title="Assine o Premium para criar vários cadernos" class="hidden mb-2 text-xs bg-yellow-100 text-yellow-900 border border-yellow-300 rounded px-2 py-1.5 cursor-pointer hover:bg-yellow-200 transition">
         ⭐ Assine o Premium para criar vários cadernos (R$ 4,90/mês)
       </div>
@@ -189,7 +190,7 @@
   <main id="mainLayout" class="flex-1 flex flex-col md:flex-row overflow-hidden">
 
     <!-- Editor (esquerda) -->
-    <section id="editorPane" class="flex-1 flex flex-col md:w-1/2 bg-white md:border-r border-gray-200 overflow-hidden">
+    <section id="editorPane" class="min-w-0 flex-1 flex flex-col md:w-1/2 bg-white md:border-r border-gray-200 overflow-hidden">
       <div class="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-3 flex-wrap">
         <label class="text-xs font-semibold text-gray-500">Fonte:</label>
         <input id="fontSize" type="range" min="12" max="32" value="17" class="w-24" />
@@ -230,7 +231,7 @@
     </section>
 
     <!-- Painel direito: Anexos / Bíblia -->
-    <section id="rightPane" class="flex-1 flex flex-col md:w-1/2 bg-gray-50 overflow-hidden">
+    <section id="rightPane" class="min-w-0 flex-1 flex flex-col md:w-1/2 bg-gray-50 overflow-hidden">
       <!-- Abas -->
       <div class="shrink-0 px-3 pt-2 bg-gray-50 border-b border-gray-200 flex items-center gap-1">
         <button id="tabAnnex" class="text-xs font-medium px-3 py-1.5 rounded-t border border-b-0">📎 Anexos</button>
@@ -245,7 +246,7 @@
             📎 Anexar arquivo
             <input id="fileInput" type="file" accept=".pdf,image/*" class="hidden" />
           </label>
-          <span class="text-xs text-gray-400">ou</span>
+          <span class="text-xs text-gray-500">ou</span>
           <button id="btnSnap" class="text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-100 transition">
             📷 Capturar câmera
           </button>
@@ -272,7 +273,7 @@
           <img id="mediaLayer" class="absolute inset-0 m-auto max-w-full max-h-full canvas-hidden object-contain" alt="anexo" />
           <canvas id="drawingCanvas" class="absolute inset-0 m-auto max-w-full max-h-full"></canvas>
 
-          <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400 text-center p-6">
+          <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-center p-6">
             <div class="text-5xl mb-3">🖼️</div>
             <p class="font-medium">Nenhum anexo nesta página</p>
             <p class="text-sm mt-1">Anexe um PDF ou foto e desenhe por cima</p>
@@ -308,13 +309,13 @@
         </div>
 
         <!-- Conteúdo -->
-        <div id="bibleContent" class="flex-1 overflow-auto p-4 bg-white text-gray-800 leading-relaxed"></div>
+        <div id="bibleContent" class="flex-1 overflow-auto p-6 bg-white text-gray-800 leading-relaxed"></div>
       </div>
     </section>
   </main>
 
   <!-- Rodapé -->
-  <footer class="shrink-0 bg-white border-t border-gray-200 px-4 py-2 flex items-center justify-center gap-4 text-xs text-gray-500">
+  <footer class="shrink-0 bg-white border-t border-gray-200 px-4 py-2 flex items-center justify-center gap-4 text-xs text-gray-600">
     <span>&copy; <span id="footerYear"></span> Caderno de Estudos</span>
     <span class="w-px h-3 bg-gray-300"></span>
     <a href="termos.html" class="hover:text-blue-600 hover:underline transition" title="Termos de Uso e Política de Privacidade">Termos de Uso</a>
@@ -332,7 +333,7 @@
     <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
       <div class="flex items-start justify-between mb-3">
         <h3 id="premiumTitle" class="text-lg font-bold text-gray-800">⭐ Assinar Premium</h3>
-        <button id="btnClosePremium" class="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
+        <button id="btnClosePremium" class="text-gray-500 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
       </div>
       <p class="text-sm text-gray-600 mb-2">Cadernos ilimitados na nuvem por <strong id="premiumPriceDisplay">R$ 4,90/mês</strong>.</p>
       <div class="flex gap-2 mb-1">
@@ -347,7 +348,7 @@
         </button>
         <button id="btnCancelPremium" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium px-4 py-2.5 rounded transition">Cancelar</button>
       </div>
-      <p class="text-[11px] text-gray-400 mt-3">Pagamento seguro via Mercado Pago (assinatura recorrente mensal). Ao continuar você concorda com os termos.</p>
+      <p class="text-xs text-gray-500 mt-3">Pagamento seguro via Mercado Pago (assinatura recorrente mensal). Ao continuar você concorda com os termos.</p>
     </div>
   </div>
 </body>

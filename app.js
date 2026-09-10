@@ -334,6 +334,10 @@
     }
 
     document.addEventListener("keydown", (e) => {
+      const t = e.target;
+      const inEditable = t && (t.isContentEditable ||
+        (t.tagName && /^(INPUT|TEXTAREA|SELECT)$/i.test(t.tagName)));
+      if (inEditable) return; // não roubar as setas do editor/campos
       if (page().attachment && page().attachment.type === "pdf" && currentPdfDoc) {
         if (e.key === "ArrowRight" && page().attachment.currentPdfPage < currentPdfDoc.numPages) {
           page().attachment.currentPdfPage++;
@@ -374,7 +378,7 @@
       ctx.lineJoin = "round";
       ctx.strokeStyle = penColor.value;
       ctx.globalAlpha = penTool.value === "marker" ? 0.35 : 1;
-      ctx.lineWidth = (penTool.value === "marker" ? 3 : 1) * parseInt(penSize.value, 10) * Math.max(sx, sy);
+      ctx.lineWidth = (penTool.value === "marker" ? 3 : 1) * parseInt(penSize.value, 10) * Math.min(sx, sy);
     }
     function moveDrawFrom(x, y) {
       if (!drawing) return;
@@ -398,7 +402,7 @@
       drawing = false;
       if (penTool.value === "line") {
         ctx.globalAlpha = 1;
-        ctx.lineWidth = parseInt(penSize.value, 10) * Math.max(
+        ctx.lineWidth = parseInt(penSize.value, 10) * Math.min(
           drawingCanvas.width / drawingCanvas.getBoundingClientRect().width,
           drawingCanvas.height / drawingCanvas.getBoundingClientRect().height
         );
@@ -596,6 +600,21 @@
       }
     }
 
+    function buildTableHtml(rows) {
+      let html = "<table>";
+      rows.forEach(function (row, i) {
+        html += "<tr>";
+        row.forEach(function (cell) {
+          const cellText = String(cell == null ? "" : cell)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+          html += (i === 0 ? "<th>" : "<td>") + cellText + (i === 0 ? "</th>" : "</td>");
+        });
+        html += "</tr>";
+      });
+      html += "</table>";
+      return html;
+    }
+
     $("imgInput").addEventListener("change", (e) => {
       const f = e.target.files[0];
       e.target.value = "";
@@ -607,23 +626,31 @@
           placeInserted('<img src="' + ev.target.result + '" alt="imagem" />');
         };
         reader.readAsDataURL(f);
+      } else if (/\.(xlsx|xls)$/i.test(f.name)) {
+        if (typeof XLSX === "undefined") {
+          alert("Leitor de planilhas não carregado. Recarregue a página e tente novamente.");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            if (!ws) { alert("A planilha parece estar vazia."); return; }
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+            placeInserted(buildTableHtml(rows));
+          } catch (err) {
+            alert("Não foi possível ler a planilha: " + err.message);
+          }
+        };
+        reader.readAsArrayBuffer(f);
       } else {
-        // planilha: inserir como tabela simples (melhor assim do que tentar renderizar o binário)
+        // CSV/TSV/texto: converte em tabela simples
         const reader = new FileReader();
         reader.onload = (ev) => {
           const text = String(ev.target.result || "").trim();
-          const rows = text.split(/\r?\n/).map((r) => r.split("\t"));
-          let html = "<table>";
-          rows.forEach(function (row, i) {
-            html += "<tr>";
-            row.forEach(function (cell) {
-              const cellText = cell.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-              html += (i === 0 ? "<th>" : "<td>") + cellText + (i === 0 ? "</th>" : "</td>");
-            });
-            html += "</tr>";
-          });
-          html += "</table>";
-          placeInserted(html);
+          const rows = text.split(/\r?\n/).map((r) => r.split(/\t|;/));
+          placeInserted(buildTableHtml(rows));
         };
         reader.readAsText(f);
       }
@@ -746,6 +773,8 @@
       }
       if (e.key === "Escape") {
         clearImgSelection();
+        closePremiumModal();
+        closeDrawer();
       }
     });
 
@@ -860,10 +889,7 @@
       if (state.activePageIndex < notebook().pages.length - 1) { state.activePageIndex++; currentPdfDoc = null; saveState(); renderUI(); }
     });
     $("btnNewNotebook").addEventListener("click", () => {
-      if (billingStatus.confirmed && !billingStatus.is_premium) {
-        alert("Seu plano permite apenas 1 caderno. Assine o Premium (R$ 4,90/mês) para criar vários cadernos.");
-        return;
-      }
+      if (!canCreateNotebook()) return;
       const name = prompt("Nome do novo caderno:", "Novo Caderno");
       if (name === null) return;
       const nb = { id: "nb" + Date.now(), name: name, pages: [defaultPage()] };
@@ -894,10 +920,7 @@
     $("btnCloseDrawer").addEventListener("click", closeDrawer);
     drawerBackdrop.addEventListener("click", closeDrawer);
     $("btnNewNotebookDrawer").addEventListener("click", () => {
-      if (billingStatus.confirmed && !billingStatus.is_premium) {
-        alert("Seu plano permite apenas 1 caderno. Assine o Premium (R$ 4,90/mês) para criar vários cadernos.");
-        return;
-      }
+      if (!canCreateNotebook()) return;
       const name = prompt("Nome do novo caderno:", "Novo Caderno");
       if (name === null) return;
       const nb = { id: "nb" + Date.now(), name: name, pages: [defaultPage()] };
@@ -909,6 +932,72 @@
       renderUI();
       closeDrawer();
     });
+
+    function exportBackup() {
+      const payload = {
+        app: "caderno-de-estudos",
+        kind: "backup",
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        state,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "caderno-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    $("btnBackup").addEventListener("click", exportBackup);
+
+    function importBackup(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          const data = parsed && parsed.state ? parsed.state : parsed;
+          if (!data || !Array.isArray(data.notebooks) || data.notebooks.length === 0) {
+            alert("Arquivo de backup inválido: nenhum caderno encontrado.");
+            return;
+          }
+          if (!confirm("Restaurar o backup? O conteúdo atual deste navegador será substituído.")) return;
+          data.notebooks.forEach((n) => {
+            if (!Array.isArray(n.pages)) n.pages = [defaultPage()];
+            n.pages = n.pages.map((p) => ({ text: p.text || "", attachment: p.attachment || null, drawing: p.drawing || null }));
+          });
+          state.notebooks = data.notebooks;
+          state.activeNotebookId = data.activeNotebookId && state.notebooks.some((n) => n.id === data.activeNotebookId)
+            ? data.activeNotebookId
+            : state.notebooks[0].id;
+          state.activePageIndex = Number.isInteger(data.activePageIndex) ? data.activePageIndex : 0;
+          if (data.layout && ["split", "fullRight", "fullEditor"].indexOf(data.layout) >= 0) state.layout = data.layout;
+          if (data.bible) {
+            state.bible = Object.assign({ version: "almeida-livre", hebrew: false, book: "Gen", chapter: 1, saved: {}, fontScale: 16 }, data.bible);
+            if (!state.bible.saved) state.bible.saved = {};
+          }
+          currentPdfDoc = null;
+          saveState();
+          renderUI();
+          applyLayout();
+          applyTab();
+          renderNotebookList();
+          alert("Backup restaurado com sucesso.");
+        } catch (err) {
+          alert("Não foi possível restaurar o backup: arquivo JSON inválido.");
+        }
+      };
+      reader.readAsText(file);
+    }
+    const restoreInput = $("restoreInput");
+    if (restoreInput) {
+      $("btnRestore").addEventListener("click", () => restoreInput.click());
+      restoreInput.addEventListener("change", (e) => {
+        const f = e.target.files[0];
+        restoreInput.value = "";
+        if (f) importBackup(f);
+      });
+    }
 
     function renderNotebookList() {
       notebookList.innerHTML = "";
@@ -1400,6 +1489,17 @@
     function isPremiumActive() {
       return !!(billingStatus && billingStatus.confirmed && billingStatus.is_premium === true);
     }
+
+    // Guarda única do plano gratuito: permite apenas 1 caderno (valor aplicado
+    // tanto para contas quanto para uso local anônimo, fechando o bypass local).
+    function canCreateNotebook() {
+      if (isPremiumActive()) return true;
+      if (state.notebooks.length >= 1) {
+        alert("Seu plano permite apenas 1 caderno. Assine o Premium (R$ 4,90/mês) para criar vários cadernos.");
+        return false;
+      }
+      return true;
+    }
     function formatDate(iso) {
       try {
         const d = new Date(iso);
@@ -1516,6 +1616,8 @@
       renderPremiumPrice();
       $("premiumModal").classList.remove("hidden");
       $("premiumModalBackdrop").classList.remove("hidden");
+      const cupomFocus = $("cupomInput");
+      if (cupomFocus) cupomFocus.focus();
     }
 
     function closePremiumModal() {
@@ -1652,9 +1754,36 @@
        ========================================================= */
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js').catch(function () {
+        navigator.serviceWorker.register('sw.js').then(function (reg) {
+          reg.addEventListener('updatefound', function () {
+            const nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener('statechange', function () {
+              if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                showUpdateBanner();
+              }
+            });
+          });
+        }).catch(function () {
           // silencioso: fallback para funcionamento normal
         });
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          // Nova versão já ativa: recarrega para usar o novo código
+          window.location.reload();
+        });
+      });
+    }
+
+    function showUpdateBanner() {
+      if (document.getElementById("updateBanner")) return;
+      const b = document.createElement("div");
+      b.id = "updateBanner";
+      b.className = "update-banner";
+      b.innerHTML = "<span>Nova versão disponível.</span> <button type=\"button\" id=\"updateBannerBtn\">Atualizar</button>";
+      document.body.appendChild(b);
+      const btn = document.getElementById("updateBannerBtn");
+      btn.addEventListener("click", function () {
+        window.location.reload();
       });
     }
 

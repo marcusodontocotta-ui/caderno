@@ -1,7 +1,27 @@
-const CACHE = "caderno-pwa-v1";
+const CACHE = "caderno-pwa-v2";
+const PRECACHE = [
+  "/",
+  "index.html",
+  "termos.html",
+  "manifest.json",
+  "app.js",
+  "sw.js",
+  "vendor/pdf.min.js",
+  "vendor/purify.min.js",
+  "vendor/xlsx.full.min.js",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
+  "icons/maskable-512.png",
+];
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(PRECACHE))
+      .then(() => self.skipWaiting())
+      .catch(() => {})
+  );
 });
 
 self.addEventListener("activate", (event) => {

@@ -7,7 +7,40 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" type="image/png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <title>Caderno de Estudos</title>
+  <title>Caderno de Estudos — anotações, planilhas e Bíblia em um só lugar</title>
+  <meta name="description" content="Caderno digital gratuito para anotações de aula, estudos bíblicos e anexos de PDF/fotos, com sincronização na nuvem e plano Premium." />
+  <meta name="keywords" content="caderno digital, anotações, estudos bíblicos, bíblia online, caderno de estudos, PDF, anexos, sincronização nuvem" />
+  <meta name="author" content="Caderno de Estudos" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://caderno-fy36.onrender.com/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="pt_BR" />
+  <meta property="og:site_name" content="Caderno de Estudos" />
+  <meta property="og:title" content="Caderno de Estudos — anotações e estudos em qualquer dispositivo" />
+  <meta property="og:description" content="Caderno digital gratuito para anotações de aula, estudos bíblicos e anexos de PDF/fotos, com sincronização na nuvem e plano Premium." />
+  <meta property="og:url" content="https://caderno-fy36.onrender.com/" />
+  <meta property="og:image" content="https://caderno-fy36.onrender.com/icons/icon-512.png" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Caderno de Estudos" />
+  <meta name="twitter:description" content="Caderno digital gratuito para anotações, estudos bíblicos e anexos de PDF/fotos." />
+  <meta name="twitter:image" content="https://caderno-fy36.onrender.com/icons/icon-512.png" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Caderno de Estudos",
+    "applicationCategory": "EducationalApplication",
+    "operatingSystem": "Any",
+    "url": "https://caderno-fy36.onrender.com/",
+    "description": "Caderno digital gratuito para anotações de aula, estudos bíblicos e anexos de PDF/fotos, com sincronização na nuvem.",
+    "offers": {
+      "@type": "Offer",
+      "price": "4.90",
+      "priceCurrency": "BRL",
+      "description": "Plano Premium com cadernos ilimitados na nuvem."
+    }
+  }
+  </script>
   <!--
     Content-Security-Policy (MÉDIA-4/6). Decisão:
     - Sessão migrada para cookie httpOnly (SameSite=Lax, Secure) => o JWT não fica
@@ -36,6 +69,7 @@
   <script src="https://cdn.tailwindcss.com/3.4.16" integrity="sha384-mS5Uq7sE90lgbBDN8xgf34ibEgbZo4gB3tfLY40ZRle+M188BQw8onzNHg6GUZaA" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="vendor/pdf.min.js"></script>
   <script src="vendor/purify.min.js"></script>
+  <script src="vendor/xlsx.full.min.js"></script>
   <style>
     .canvas-hidden { display: none !important; }
     #canvasLayer { touch-action: none; }
@@ -64,6 +98,16 @@
     #imgResizeHandle.hidden-h { display: none; }
     #editor table { border-collapse: collapse; margin: 6px 0; }
     #editor table td, #editor table th { border: 1px solid #d1d5db; padding: 4px 8px; }
+    .update-banner {
+      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+      z-index: 80; background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 10px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.25); display: flex; align-items: center; gap: 10px;
+      font-size: 13px; max-width: 90vw;
+    }
+    .update-banner button {
+      background: #3b82f6; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px;
+      font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
   </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -82,7 +126,7 @@
       <button id="btnNotebooks" title="Abrir meus cadernos" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-1.5 rounded transition">
         📚 Cadernos
       </button>
-      <button id="btnLayout" title="Alternar 50/50 ou tela cheia" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded transition">
+      <button id="btnLayout" title="Alternar 50/50 ou tela cheia" aria-label="Alternar 50/50 ou tela cheia" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded transition">
         ⛶ Tela cheia
       </button>
       <button id="btnNewNotebook" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-1.5 rounded transition">
@@ -116,7 +160,7 @@
 
   <!-- Drawer lateral: lista de cadernos -->
   <div id="drawerBackdrop" class="fixed inset-0 bg-black/30 z-40 hidden"></div>
-  <aside id="drawer" class="fixed top-0 left-0 h-full w-80 max-w-[85vw] bg-white shadow-2xl z-50 flex flex-col -translate-x-full">
+  <aside id="drawer" role="dialog" aria-modal="true" aria-label="Meus cadernos" class="fixed top-0 left-0 h-full w-80 max-w-[85vw] bg-white shadow-2xl z-50 flex flex-col -translate-x-full">
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
       <h2 class="font-bold text-gray-800">📚 Meus Cadernos</h2>
       <button id="btnCloseDrawer" class="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
@@ -129,6 +173,15 @@
       <button id="btnNewNotebookDrawer" class="w-full text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-2 rounded transition">
         + Novo caderno
       </button>
+      <div class="mt-2 flex gap-2">
+        <button id="btnBackup" title="Salvar todo o conteúdo em um arquivo de backup (JSON)" class="flex-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-2 rounded transition">
+          ⬇️ Backup
+        </button>
+        <button id="btnRestore" title="Restaurar conteúdo de um arquivo de backup (JSON)" class="flex-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-3 py-2 rounded transition">
+          ⬆️ Restaurar
+        </button>
+      </div>
+      <input id="restoreInput" type="file" accept="application/json,.json" class="hidden" aria-hidden="true" tabindex="-1" />
     </div>
   </aside>
 
@@ -156,7 +209,7 @@
         <button id="btnImgSize" title="Redimensionar a imagem selecionada" class="text-xs px-2 py-1 rounded border border-blue-400 bg-blue-50 text-blue-700 hover:bg-blue-100 hidden">↔ Tamanho</button>
         <span id="imgSizeBox" class="hidden items-center gap-2 text-xs text-gray-600">
           <label title="Largura da imagem" class="cursor-pointer">↔
-            <input id="imgSizeSlider" type="range" min="40" max="900" value="300" class="w-32 align-middle" />
+            <input id="imgSizeSlider" type="range" min="40" max="900" value="300" class="w-32 align-middle" aria-label="Largura da imagem" />
           </label>
           <span id="imgSizeVal" class="text-gray-500 w-10">300</span>
         </span>
@@ -203,7 +256,7 @@
             <input id="chkDrawing" type="checkbox" class="accent-blue-600" /> ✏️ Desenhar
           </label>
           <input id="penColor" type="color" value="#ef4444" class="w-7 h-7 border border-gray-300 rounded cursor-pointer" title="Cor da caneta" />
-          <input id="penSize" type="range" min="1" max="20" value="4" class="w-20" title="Espessura da caneta" />
+          <input id="penSize" type="range" min="1" max="20" value="4" class="w-20" title="Espessura da caneta" aria-label="Espessura da caneta" />
           <select id="penTool" title="Ferramenta de desenho" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5">
             <option value="pen">🖊️ Caneta</option>
             <option value="marker">🖍️ Realçador</option>
@@ -246,7 +299,7 @@
           <select id="bibleBook" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5 max-w-[10rem]"></select>
           <select id="bibleChapter" class="text-xs bg-white border border-gray-300 rounded px-2 py-1.5"></select>
           <label class="text-xs flex items-center gap-1 text-gray-600 ml-1">
-            <input id="bibleFontRange" type="range" min="12" max="40" value="17" class="w-20" /> A-
+            <input id="bibleFontRange" type="range" min="12" max="40" value="17" class="w-20" aria-label="Tamanho da fonte da Bíblia" /> A-
           </label>
           <button id="bibleMark" title="Realçar o texto selecionado" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-yellow-100">🖍 Realçar</button>
           <button id="bibleUnder" title="Sublinhar o texto selecionado" class="text-xs px-2 py-1.5 rounded border border-gray-300 hover:bg-gray-100">U Sublinhar</button>
@@ -267,16 +320,18 @@
     <a href="termos.html" class="hover:text-blue-600 hover:underline transition" title="Termos de Uso e Política de Privacidade">Termos de Uso</a>
     <span class="w-px h-3 bg-gray-300"></span>
     <a href="termos.html" class="hover:text-blue-600 hover:underline transition" title="Termos de Uso e Política de Privacidade">Política de Privacidade</a>
+    <span class="w-px h-3 bg-gray-300"></span>
+    <a href="mailto:marcusodontocotta@gmail.com" class="hover:text-blue-600 hover:underline transition" title="Fale conosco">marcusodontocotta@gmail.com</a>
   </footer>
 
   <script src="app.js"></script>
 
   <!-- Modal de assinatura Premium com cupom -->
   <div id="premiumModalBackdrop" class="fixed inset-0 bg-black/40 z-[60] hidden flex items-center justify-center p-4"></div>
-  <div id="premiumModal" class="hidden fixed z-[70] inset-0 flex items-center justify-center p-4">
+  <div id="premiumModal" role="dialog" aria-modal="true" aria-labelledby="premiumTitle" class="hidden fixed z-[70] inset-0 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
       <div class="flex items-start justify-between mb-3">
-        <h3 class="text-lg font-bold text-gray-800">⭐ Assinar Premium</h3>
+        <h3 id="premiumTitle" class="text-lg font-bold text-gray-800">⭐ Assinar Premium</h3>
         <button id="btnClosePremium" class="text-gray-400 hover:text-gray-700 text-xl leading-none px-1" title="Fechar">✕</button>
       </div>
       <p class="text-sm text-gray-600 mb-2">Cadernos ilimitados na nuvem por <strong id="premiumPriceDisplay">R$ 4,90/mês</strong>.</p>

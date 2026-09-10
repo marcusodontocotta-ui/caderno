@@ -1672,6 +1672,8 @@
       if (installBtn) installBtn.classList.add("hidden");
     }
 
+    showInstallButton();
+
     window.addEventListener("beforeinstallprompt", function (e) {
       e.preventDefault();
       deferredPrompt = e;

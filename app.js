@@ -1464,7 +1464,12 @@
       }
       try {
         let r = await api("/auth/login", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
-        if (r.status === 401) {
+        if (r.status !== 200) {
+          const motivo = (r.body && r.body.detail) ? r.body.detail : "erro";
+          const criar = confirm("Login falhou (" + motivo + ").\n\nCriar uma conta nova com este e-mail?");
+          if (!criar) return;
+          const confirme = prompt("Confirme a senha para criar a conta:");
+          if (confirme !== password) { alert("As senhas não conferem."); return; }
           r = await api("/auth/register", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
         }
         if (r.status !== 200 && r.status !== 201) {

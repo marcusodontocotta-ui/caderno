@@ -1004,7 +1004,7 @@
       state.notebooks.forEach((nb) => {
         const item = document.createElement("div");
         const active = nb.id === state.activeNotebookId;
-        item.className = "border rounded-lg overflow-hidden " + (active ? "border-blue-400 ring-1 ring-blue-200" : "border-gray-200");
+        item.className = "border rounded-lg overflow-hidden shadow-sm " + (active ? "border-blue-500 ring-1 ring-blue-200 bg-blue-50/30" : "border-gray-200 hover:border-gray-300");
         const head = document.createElement("div");
         head.className = "flex items-center gap-2 px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100";
         head.innerHTML = '<span class="font-semibold text-gray-800 flex-1 truncate">' + escapeHtml(nb.name || "Sem nome") + "</span>" +
@@ -1058,7 +1058,7 @@
       for (let i = 0; i < n.pages.length; i++) {
         const b = document.createElement("button");
         b.textContent = (i + 1);
-        b.className = "w-7 h-7 shrink-0 text-xs rounded border transition " +
+        b.className = "w-8 h-8 shrink-0 text-xs rounded-lg border border-gray-200 transition " +
           (i === state.activePageIndex ? "bg-blue-600 text-white border-blue-600 font-bold" : "bg-white border-gray-300 text-gray-600 hover:bg-gray-100");
         b.title = "Página " + (i + 1);
         b.addEventListener("click", () => {

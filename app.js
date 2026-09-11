@@ -1629,18 +1629,23 @@
         return;
       }
       cupomAplicado = null;
-      $("cupomInput").value = "";
+      const cupomEl = $("cupomInput");
+      if (cupomEl) cupomEl.value = "";
       setCupomStatus("Tem um cupom? Digite acima para ver o desconto. (Ex.: CADERNO50, CADERNO80)", false);
       renderPremiumPrice();
-      $("premiumModal").classList.remove("hidden");
-      $("premiumModalBackdrop").classList.remove("hidden");
+      const modal = $("premiumModal");
+      const backdrop = $("premiumModalBackdrop");
+      if (modal) modal.classList.remove("hidden");
+      if (backdrop) backdrop.classList.remove("hidden");
       const cupomFocus = $("cupomInput");
       if (cupomFocus) cupomFocus.focus();
     }
 
     function closePremiumModal() {
-      $("premiumModal").classList.add("hidden");
-      $("premiumModalBackdrop").classList.add("hidden");
+      const modal = $("premiumModal");
+      const backdrop = $("premiumModalBackdrop");
+      if (modal) modal.classList.add("hidden");
+      if (backdrop) backdrop.classList.add("hidden");
     }
 
     async function subscribePremium() {
@@ -1662,17 +1667,24 @@
         alert("Erro ao gerar o checkout.");
       }
     }
-    $("btnPremium").addEventListener("click", openPremiumModal);
+    const _btnPremium = $("btnPremium");
+    if (_btnPremium) _btnPremium.addEventListener("click", openPremiumModal);
     const _premBadge = $("premiumBadge");
     if (_premBadge) _premBadge.addEventListener("click", openPremiumModal);
     const _premBadgeDrawer = $("premiumBadgeDrawer");
     if (_premBadgeDrawer) _premBadgeDrawer.addEventListener("click", openPremiumModal);
-    $("btnAplicarCupom").addEventListener("click", aplicarCupom);
-    $("cupomInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aplicarCupom(); } });
-    $("btnConfirmarPremium").addEventListener("click", () => { subscribePremium(); });
-    $("btnCancelPremium").addEventListener("click", closePremiumModal);
-    $("btnClosePremium").addEventListener("click", closePremiumModal);
-    $("premiumModal").addEventListener("click", (e) => { if (e.target.id === "premiumModal") closePremiumModal(); });
+    const _btnAplicarCupom = $("btnAplicarCupom");
+    if (_btnAplicarCupom) _btnAplicarCupom.addEventListener("click", aplicarCupom);
+    const _cupomInput = $("cupomInput");
+    if (_cupomInput) _cupomInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aplicarCupom(); } });
+    const _btnConfirmarPremium = $("btnConfirmarPremium");
+    if (_btnConfirmarPremium) _btnConfirmarPremium.addEventListener("click", () => { subscribePremium(); });
+    const _btnCancelPremium = $("btnCancelPremium");
+    if (_btnCancelPremium) _btnCancelPremium.addEventListener("click", closePremiumModal);
+    const _btnClosePremium = $("btnClosePremium");
+    if (_btnClosePremium) _btnClosePremium.addEventListener("click", closePremiumModal);
+    const _premiumModal = $("premiumModal");
+    if (_premiumModal) _premiumModal.addEventListener("click", (e) => { if (e.target.id === "premiumModal") closePremiumModal(); });
 
     function cloudNotebooks() {
       return state.notebooks.map((n) => ({

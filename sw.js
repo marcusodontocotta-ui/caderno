@@ -1,4 +1,4 @@
-const CACHE = "caderno-pwa-v3";
+const CACHE = "caderno-pwa-v4";
 const PRECACHE = [
   "/",
   "index.html",

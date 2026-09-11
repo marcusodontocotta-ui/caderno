@@ -1384,7 +1384,7 @@
     const API_BASE = "https://caderno-app.onrender.com";
     const AUTH_KEY = "cadernoEstudos.auth";   // LEGADO: token solto em localStorage
     let cloudTimer = null;
-    let session = null;                       // { email } — JWT vive no cookie httpOnly
+    let session = null;                       // { email, name } — JWT vive no cookie httpOnly
 
     // Compat: usuários antigos têm { token } no localStorage. O backend ainda
     // aceita `Authorization: Bearer`, então mantemos o token legado como header
@@ -1398,8 +1398,8 @@
 
     function isLoggedIn() { return !!(session && session.email); }
 
-    function setSession(email) {
-      session = email ? { email } : null;
+    function setSession(email, name) {
+      session = email ? { email, name: name || null } : null;
       if (email) { try { localStorage.removeItem(AUTH_KEY); } catch (e) {} }
       renderAccountUi();
       refreshPremiumStatus();
@@ -1412,7 +1412,7 @@
       try {
         const r = await api("/auth/me", { method: "GET" });
         if (r.status === 200 && r.body && r.body.email) {
-          session = { email: r.body.email };
+          session = { email: r.body.email, name: r.body.name || null };
           refreshPremiumStatus();
           return true;
         }
@@ -1434,12 +1434,24 @@
 
     function renderAccountUi() {
       const btn = $("btnAccount");
+      const greeting = $("userGreeting");
       if (isLoggedIn()) {
-        btn.textContent = "👤 Sair (" + session.email + ")";
+        const displayName = session.name || session.email;
+        btn.textContent = "👤 Sair (" + displayName + ")";
         btn.title = "Encerrar sessão";
+        if (greeting) {
+          greeting.textContent = "Olá, " + displayName + " 👋";
+          greeting.classList.remove("hidden");
+          greeting.classList.add("inline-block");
+        }
       } else {
         btn.textContent = "👤 Entrar";
         btn.title = "Entrar e sincronizar na nuvem";
+        if (greeting) {
+          greeting.textContent = "";
+          greeting.classList.add("hidden");
+          greeting.classList.remove("inline-block");
+        }
       }
     }
     $("btnAccount").addEventListener("click", async () => {
@@ -1470,13 +1482,14 @@
           if (!criar) return;
           const confirme = prompt("Confirme a senha para criar a conta:");
           if (confirme !== password) { alert("As senhas não conferem."); return; }
-          r = await api("/auth/register", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+          const nome = prompt("Seu nome (aparece no topo da tela):");
+          r = await api("/auth/register", { method: "POST", body: JSON.stringify({ email: email.trim(), password, name: (nome && nome.trim()) || null }) });
         }
         if (r.status !== 200 && r.status !== 201) {
           alert("Não foi possível entrar: " + (r.body && r.body.detail ? r.body.detail : "erro" ));
           return;
         }
-        setSession(r.body.email || email.trim());
+        setSession(r.body.email || email.trim(), r.body.name || null);
         alert("Conta conectada! Suas anotações serão sincronizadas na nuvem.");
         startCloudSync();
       } catch (e) {

@@ -46,7 +46,7 @@
     };
 
     function defaultPage() {
-      return { text: "", attachment: null, drawing: null };
+      return { text: "", attachments: [], drawing: null };
     }
 
     function loadState() {
@@ -58,7 +58,7 @@
         state.bible = Object.assign({ version: "almeida-livre", hebrew: false, book: "Gen", chapter: 1, saved: {}, fontScale: 16 }, state.bible);
         if (!state.bible.saved) state.bible.saved = {};
         if (!state.bible.fontScale) state.bible.fontScale = 16;
-        state.notebooks.forEach((n) => n.pages.forEach((p) => { if (p.text === undefined) p.text = ""; }));
+        state.notebooks.forEach((n) => n.pages.forEach((p) => { if (p.text === undefined) p.text = ""; if (!Array.isArray(p.attachments)) p.attachments = []; }));
       } catch (e) {
         console.warn("Falha ao carregar estado", e);
       }
@@ -71,6 +71,301 @@
           alert("Aviso: os anexos ficaram grandes demais para o armazenamento local (limite ~5MB). Considere exportar ou reduzir o tamanho das imagens.");
         }
       }
+    }
+
+    /* =========================================================
+       Anexos em IndexedDB (vários por página; além do limite ~5MB)
+       ========================================================= */
+    const ATT_DB_NAME = "caderno-estudos-attachments";
+    const ATT_STORE = "attachments";
+
+    let _attDb = null;
+    let _attDbOpening = null;
+    let _attDbUnavailable = false;
+    let _attSeq = 0;
+    let _currentAtt = null;    // anexo atualmente renderizado (com dataUrl)
+    let _attCache = null;      // { pageKey, items } da página atual
+
+    function attPageKeyFor(nbId, pageIndex) {
+      return nbId + "|" + pageIndex;
+    }
+    function attPageKey() {
+      return attPageKeyFor(notebook().id, state.activePageIndex);
+    }
+    function genAttId() {
+      _attSeq = (_attSeq + 1) % 1000;
+      return "att_" + Date.now().toString(36) + "_" + _attSeq + "_" + Math.random().toString(36).slice(2, 8);
+    }
+
+    function attachmentsAvailable() {
+      return typeof indexedDB !== "undefined" && !_attDbUnavailable;
+    }
+
+    function openAttDb() {
+      if (_attDb) return Promise.resolve(_attDb);
+      if (_attDbOpening) return _attDbOpening;
+      if (_attDbUnavailable) {
+        return Promise.reject(new Error("IndexedDB indisponível"));
+      }
+      _attDbOpening = new Promise((resolve, reject) => {
+        let req;
+        try {
+          req = indexedDB.open(ATT_DB_NAME, 1);
+        } catch (e) {
+          _attDbUnavailable = true;
+          _attDbOpening = null;
+          reject(e);
+          return;
+        }
+        req.onupgradeneeded = function () {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(ATT_STORE)) {
+            db.createObjectStore(ATT_STORE, { keyPath: "pageKey" });
+          }
+        };
+        req.onsuccess = function () {
+          _attDb = req.result;
+          _attDbOpening = null;
+          resolve(_attDb);
+        };
+        req.onerror = function () {
+          _attDbUnavailable = true;
+          _attDbOpening = null;
+          reject(req.error || new Error("Falha ao abrir IndexedDB"));
+        };
+        req.onblocked = function () {
+          _attDbUnavailable = true;
+          _attDbOpening = null;
+          reject(new Error("IndexedDB bloqueado"));
+        };
+      });
+      return _attDbOpening;
+    }
+
+    function attReq(fn) {
+      return new Promise((resolve, reject) => {
+        openAttDb().then(function (db) {
+          const tx = db.transaction(ATT_STORE, "readwrite");
+          const store = tx.objectStore(ATT_STORE);
+          let out;
+          try {
+            out = fn(store);
+          } catch (e) {
+            tx.abort();
+            reject(e);
+            return;
+          }
+          out.onsuccess = function () { resolve(out.result); };
+          out.onerror = function () { reject(out.error || tx.error || new Error("IndexedDB store error")); };
+        }).catch(reject);
+      });
+    }
+
+    const attachmentsStore = {
+      // Lista completa (com dataUrl) dos anexos de uma página
+      get: function (nbId, pageIndex) {
+        const key = attPageKeyFor(nbId, pageIndex);
+        return attReq(function (store) { return store.get(key); }).then(function (rec) {
+          return (rec && Array.isArray(rec.items)) ? rec.items : [];
+        });
+      },
+      put: function (nbId, pageIndex, items) {
+        const key = attPageKeyFor(nbId, pageIndex);
+        return attReq(function (store) { return store.put({ pageKey: key, items: items || [] }); });
+      },
+      remove: function (nbId, pageIndex) {
+        const key = attPageKeyFor(nbId, pageIndex);
+        return attReq(function (store) { return store.delete(key); }).then(function () {});
+      },
+      removeNotebook: function (nbId) {
+        const prefix = nbId + "|";
+        return new Promise((resolve, reject) => {
+          openAttDb().then(function (db) {
+            const tx = db.transaction(ATT_STORE, "readwrite");
+            const store = tx.objectStore(ATT_STORE);
+            const req = store.openCursor();
+            req.onsuccess = function () {
+              const cur = req.result;
+              if (cur) {
+                if (String(cur.key).indexOf(prefix) === 0) cur.delete();
+                cur.continue();
+              }
+            };
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { reject(tx.error || new Error("IndexedDB removeNotebook")); };
+          }).catch(reject);
+        });
+      },
+      clearAll: function () {
+        return new Promise((resolve, reject) => {
+          openAttDb().then(function (db) {
+            const tx = db.transaction(ATT_STORE, "readwrite");
+            tx.objectStore(ATT_STORE).clear();
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { reject(tx.error || new Error("IndexedDB clearAll")); };
+          }).catch(reject);
+        });
+      },
+    };
+
+    /* ---- Migração automática do formato antigo (1 anexo por página) ---- */
+    async function migrateLegacyAttachments() {
+      if (!attachmentsAvailable()) return 0;
+      let migrated = 0;
+      for (const nb of state.notebooks) {
+        for (let i = 0; i < nb.pages.length; i++) {
+          const p = nb.pages[i];
+          if (!p || !p.attachment) continue;
+          if (Array.isArray(p.attachments) && p.attachments.length) {
+            delete p.attachment;
+            continue;
+          }
+          const old = p.attachment;
+          const id = genAttId();
+          try {
+            const items = await attachmentsStore.get(nb.id, i);
+            items.push({
+              id: id,
+              type: old.type,
+              name: old.name || "anexo",
+              dataUrl: old.dataUrl,
+              pageCount: old.pageCount || 1,
+              currentPdfPage: (typeof old.currentPdfPage === "number") ? old.currentPdfPage : 1,
+            });
+            await attachmentsStore.put(nb.id, i, items);
+            p.attachments = items.map(function (x) {
+              return { id: x.id, type: x.type, name: x.name, pageCount: x.pageCount || 1 };
+            });
+            if (!p.activeAttachmentId) p.activeAttachmentId = id;
+            delete p.attachment;
+            migrated++;
+          } catch (e) {
+            // IndexedDB falhou: mantém o formato antigo (fallback 1 anexo)
+          }
+        }
+      }
+      if (migrated > 0) saveState();
+      return migrated;
+    }
+
+    function pageAttachments() {
+      const p = page();
+      if (Array.isArray(p.attachments) && p.attachments.length) return p.attachments;
+      if (p.attachment) {
+        return [{ id: "legacy", type: p.attachment.type, name: p.attachment.name || "anexo", pageCount: p.attachment.pageCount || 1 }];
+      }
+      return [];
+    }
+
+    function activeAttachmentMeta() {
+      const p = page();
+      if (p.attachment) return p.attachment;
+      const list = Array.isArray(p.attachments) ? p.attachments : [];
+      if (!list.length) return null;
+      return list.find(function (m) { return m.id === p.activeAttachmentId; }) || list[0];
+    }
+
+    async function loadActiveAttachment() {
+      const p = page();
+      if (p.attachment) { _currentAtt = p.attachment; return _currentAtt; }
+      const meta = activeAttachmentMeta();
+      if (!meta) { _currentAtt = null; return null; }
+      if (meta.dataUrl) { _currentAtt = meta; return meta; } // embutido (ex.: import sem IndexedDB)
+      try {
+        if (!_attCache || _attCache.pageKey !== attPageKey()) {
+          _attCache = { pageKey: attPageKey(), items: (await attachmentsStore.get(notebook().id, state.activePageIndex)) || [] };
+        }
+        const it = _attCache.items.find(function (x) { return x.id === meta.id; }) || null;
+        _currentAtt = it;
+        return it;
+      } catch (e) {
+        _currentAtt = null;
+        _attCache = null;
+        return null;
+      }
+    }
+
+    function persistCurrentAtt() {
+      if (!_attCache || !_currentAtt) return;
+      attachmentsStore.put(notebook().id, state.activePageIndex, _attCache.items).catch(function () {});
+    }
+
+    async function addAttachment(item) {
+      if (!attachmentsAvailable()) {
+        const p = page();
+        const full = Object.assign({ id: genAttId(), currentPdfPage: 1, pageCount: 1 }, item);
+        if (!p.attachment && Array.isArray(p.attachments)) {
+          p.attachments.push(full);
+          p.activeAttachmentId = full.id;
+        } else {
+          p.attachment = full;
+        }
+        return false;
+      }
+      try {
+        const id = genAttId();
+        const full = Object.assign({ id: id, currentPdfPage: 1, pageCount: 1 }, item);
+        if (!_attCache || _attCache.pageKey !== attPageKey()) {
+          _attCache = { pageKey: attPageKey(), items: (await attachmentsStore.get(notebook().id, state.activePageIndex)) || [] };
+        }
+        _attCache.items.push(full);
+        await attachmentsStore.put(notebook().id, state.activePageIndex, _attCache.items);
+        page().attachments = _attCache.items.map(function (x) {
+          return { id: x.id, type: x.type, name: x.name, pageCount: x.pageCount || 1 };
+        });
+        page().activeAttachmentId = id;
+        delete page().attachment;
+        return true;
+      } catch (e) {
+        console.warn("IndexedDB falhou ao gravar; usando modo antigo (1 anexo por página)", e);
+        const p = page();
+        if (!p.attachment && Array.isArray(p.attachments)) {
+          p.attachments.push(full);
+          p.activeAttachmentId = full.id;
+        } else {
+          p.attachment = full;
+        }
+        return false;
+      }
+    }
+
+    async function removeAttachment(id) {
+      if (!_attCache || _attCache.pageKey !== attPageKey()) {
+        _attCache = { pageKey: attPageKey(), items: (await attachmentsStore.get(notebook().id, state.activePageIndex)) || [] };
+      }
+      _attCache.items = _attCache.items.filter(function (x) { return x.id !== id; });
+      await attachmentsStore.put(notebook().id, state.activePageIndex, _attCache.items);
+      const p = page();
+      p.attachments = (Array.isArray(p.attachments) ? p.attachments : []).filter(function (m) { return m.id !== id; });
+      if (p.activeAttachmentId === id) {
+        p.activeAttachmentId = (p.attachments.length ? p.attachments[0].id : null);
+      }
+      _currentAtt = null;
+      currentPdfDoc = null;
+    }
+
+    async function persistImportedAttachments() {
+      if (!attachmentsAvailable()) {
+        // Sem IndexedDB: os anexos continuam inline no estado (modo antigo).
+        return false;
+      }
+      let allOk = true;
+      for (const nb of state.notebooks) {
+        for (let i = 0; i < nb.pages.length; i++) {
+          const p = nb.pages[i];
+          if (!p || !Array.isArray(p.attachments) || !p.attachments.length) continue;
+          const items = p.attachments.map((a) => Object.assign({}, a));
+          try {
+            await attachmentsStore.put(nb.id, i, items);
+            p.attachments = items.map(function (x) {
+              return { id: x.id, type: x.type, name: x.name, pageCount: x.pageCount || 1 };
+            });
+          } catch (e) {
+            allOk = false;
+          }
+        }
+      }
+      return allOk;
     }
 
     function notebook() {
@@ -208,30 +503,74 @@
     /* =========================================================
        Render da página ativa (anexos)
        ========================================================= */
+    function resetViewer() {
+      pdfLayer.classList.add("canvas-hidden");
+      mediaLayer.classList.add("canvas-hidden");
+      emptyState.style.display = "flex";
+      drawingCanvas.classList.add("canvas-hidden");
+      positionCanvas(0, 0);
+    }
+
+    function renderAttachmentChips() {
+      const c = $("attachmentChips");
+      if (!c) return;
+      c.innerHTML = "";
+      const p = page();
+      let metas = [];
+      if (Array.isArray(p.attachments) && p.attachments.length) {
+        metas = p.attachments;
+      } else if (p.attachment) {
+        metas = [{ id: "legacy", type: p.attachment.type, name: p.attachment.name || "anexo", pageCount: p.attachment.pageCount || 1 }];
+      }
+      c.classList.add("hidden");
+      if (!metas.length) return;
+      c.classList.remove("hidden");
+      metas.forEach((m) => {
+        const activeId = p.activeAttachmentId || (metas[0] && metas[0].id);
+        const active = m.id === activeId;
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "max-w-full truncate text-xs px-2 py-1 rounded-lg border transition " +
+          (active ? "bg-blue-600 text-white border-blue-600" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-100");
+        b.title = m.name || "anexo";
+        b.textContent = (m.type === "pdf" ? "📄 " : "🖼️ ") + (m.name || "anexo");
+        b.addEventListener("click", () => {
+          if (page().activeAttachmentId === m.id) return;
+          page().activeAttachmentId = m.id;
+          currentPdfDoc = null;
+          saveState();
+          renderAttachmentChips();
+          renderActiveAttachment();
+        });
+        c.appendChild(b);
+      });
+    }
+
+    async function renderActiveAttachment() {
+      const att = await loadActiveAttachment();
+      if (!att) {
+        resetViewer();
+        return;
+      }
+      if (att.type === "pdf") {
+        renderPdf(att);
+      } else if (att.type === "image") {
+        emptyState.style.display = "none";
+        mediaLayer.src = att.dataUrl;
+        mediaLayer.classList.remove("canvas-hidden");
+        showPdfOverlay("image");
+      }
+    }
+
     function renderUI() {
       const n = notebook();
       notebookName.value = n.name;
       pageIndicator.textContent = (state.activePageIndex + 1) + " / " + n.pages.length;
       renderPageTabs();
       editor.innerHTML = sanitizeHtml(page().text);
-
-      const att = page().attachment;
-      pdfLayer.classList.add("canvas-hidden");
-      mediaLayer.classList.add("canvas-hidden");
-      emptyState.style.display = "flex";
-      drawingCanvas.classList.add("canvas-hidden");
-
-      if (att && att.type === "pdf") {
-        renderPdf(att);
-      } else if (att && att.type === "image") {
-        emptyState.style.display = "none";
-        mediaLayer.src = att.dataUrl;
-        mediaLayer.classList.remove("canvas-hidden");
-        showPdfOverlay("image");
-      } else {
-        positionCanvas(0, 0);
-        emptyState.style.display = "flex";
-      }
+      renderAttachmentChips();
+      resetViewer();
+      renderActiveAttachment();
     }
 
     function showPdfOverlay(mode) {
@@ -285,6 +624,10 @@
         currentPdfDoc = pdfDoc;
         att.pageCount = pdfDoc.numPages;
         if (att.currentPdfPage === undefined) att.currentPdfPage = 1;
+        const metas = pageAttachments();
+        const meta = metas.find((m) => m.id === att.id);
+        if (meta) meta.pageCount = pdfDoc.numPages;
+        if (att === _currentAtt) persistCurrentAtt();
         await drawPdfPage(pdfDoc, att.currentPdfPage);
       } catch (e) {
         console.error("Erro ao renderizar PDF", e);
@@ -338,13 +681,16 @@
       const inEditable = t && (t.isContentEditable ||
         (t.tagName && /^(INPUT|TEXTAREA|SELECT)$/i.test(t.tagName)));
       if (inEditable) return; // não roubar as setas do editor/campos
-      if (page().attachment && page().attachment.type === "pdf" && currentPdfDoc) {
-        if (e.key === "ArrowRight" && page().attachment.currentPdfPage < currentPdfDoc.numPages) {
-          page().attachment.currentPdfPage++;
-          drawPdfPage(currentPdfDoc, page().attachment.currentPdfPage);
-        } else if (e.key === "ArrowLeft" && page().attachment.currentPdfPage > 1) {
-          page().attachment.currentPdfPage--;
-          drawPdfPage(currentPdfDoc, page().attachment.currentPdfPage);
+      const _katt = _currentAtt || page().attachment;
+      if (_katt && _katt.type === "pdf" && currentPdfDoc) {
+        if (e.key === "ArrowRight" && _katt.currentPdfPage < currentPdfDoc.numPages) {
+          _katt.currentPdfPage++;
+          persistCurrentAtt();
+          drawPdfPage(currentPdfDoc, _katt.currentPdfPage);
+        } else if (e.key === "ArrowLeft" && _katt.currentPdfPage > 1) {
+          _katt.currentPdfPage--;
+          persistCurrentAtt();
+          drawPdfPage(currentPdfDoc, _katt.currentPdfPage);
         }
       }
     });
@@ -365,7 +711,7 @@
 
     function startDrawFrom(x, y) {
       if (!chkDrawing.checked) return;
-      if (!page().attachment && page().drawing === null) return;
+      if (!(_currentAtt || page().attachment) && page().drawing === null) return;
       const rect = drawingCanvas.getBoundingClientRect();
       const sx = drawingCanvas.width / rect.width;
       const sy = drawingCanvas.height / rect.height;
@@ -423,15 +769,15 @@
       const f = fileInput.files[0];
       if (!f) return;
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
-        page().attachment = {
+        await addAttachment({
           type: isPdf ? "pdf" : "image",
           dataUrl: e.target.result,
           name: f.name,
           currentPdfPage: 1,
           pageCount: 1,
-        };
+        });
         saveState();
         renderUI();
       };
@@ -439,11 +785,39 @@
       fileInput.value = "";
     });
 
-    $("btnDelAttachment").addEventListener("click", () => {
-      if (!page().attachment) return;
+    $("btnDelAttachment").addEventListener("click", async () => {
+      const p = page();
+      if (p.attachment) {
+        if (!confirm("Remover este anexo da página?")) return;
+        p.attachment = null;
+        p.drawing = null;
+        _currentAtt = null;
+        saveState();
+        renderUI();
+        return;
+      }
+      const list = Array.isArray(p.attachments) ? p.attachments : [];
+      if (!list.length) return;
+      const meta = activeAttachmentMeta();
+      const id = meta && meta.id;
+      if (!id) return;
       if (!confirm("Remover este anexo da página?")) return;
-      page().attachment = null;
-      page().drawing = null;
+      if (!attachmentsAvailable()) {
+        p.attachments = list.filter((m) => m.id !== id);
+        if (p.activeAttachmentId === id) p.activeAttachmentId = (p.attachments.length ? p.attachments[0].id : null);
+        _currentAtt = null;
+        currentPdfDoc = null;
+        p.drawing = null;
+        saveState();
+        renderUI();
+        return;
+      }
+      try {
+        await removeAttachment(id);
+        p.drawing = null;
+      } catch (e) {
+        console.warn("Erro ao remover anexo", e);
+      }
       saveState();
       renderUI();
     });
@@ -472,12 +846,13 @@
         c.height = video.videoHeight;
         c.getContext("2d").drawImage(video, 0, 0);
         stream.getTracks().forEach((t) => t.stop());
-        page().attachment = {
+        await addAttachment({
           type: "image",
           dataUrl: c.toDataURL("image/jpeg", 0.85),
           name: "foto-camera.jpg",
+          currentPdfPage: 1,
           pageCount: 1,
-        };
+        });
         saveState();
         renderUI();
       } catch (e) {
@@ -933,27 +1308,67 @@
       closeDrawer();
     });
 
-    function exportBackup() {
+    async function exportBackup() {
+      const clone = JSON.parse(JSON.stringify(state));
+      const withData = attachmentsAvailable();
+      for (const nb of clone.notebooks) {
+        for (let i = 0; i < nb.pages.length; i++) {
+          const p = nb.pages[i];
+          if (p && p.attachment) {
+            p.attachments = [p.attachment];
+            delete p.attachment;
+          }
+          const metas = (p && Array.isArray(p.attachments)) ? p.attachments : [];
+          const embeds = [];
+          for (const m of metas) {
+            let full = null;
+            if (withData) {
+              try {
+                const items = await attachmentsStore.get(nb.id, i);
+                const found = items ? items.find((x) => x.id === m.id) : null;
+                if (found) full = found;
+              } catch (e) {
+                full = null;
+              }
+            }
+            if (full) {
+              embeds.push(full);
+            } else if (m.dataUrl) {
+              embeds.push(m);
+            } else {
+              embeds.push({ id: m.id, type: m.type, name: m.name, pageCount: m.pageCount || 1, currentPdfPage: 1, dataUrl: null });
+            }
+          }
+          p.attachments = embeds;
+        }
+      }
       const payload = {
         app: "caderno-de-estudos",
         kind: "backup",
-        version: 2,
+        version: 3,
         exportedAt: new Date().toISOString(),
-        state,
+        state: clone,
       };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+      const json = JSON.stringify(payload, null, 2);
+      const big = json.length > 4 * 1024 * 1024;
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "caderno-backup-" + new Date().toISOString().slice(0, 10) + ".json";
       a.click();
       URL.revokeObjectURL(url);
+      if (big) {
+        alert("Atenção: o backup ficou grande (mais de ~4MB) por causa dos anexos. O arquivo foi gerado, mas pode demorar para abrir ou importar em outro navegador.");
+      }
     }
-    $("btnBackup").addEventListener("click", exportBackup);
+    $("btnBackup").addEventListener("click", () => {
+      exportBackup().catch(() => { alert("Não foi possível gerar o backup."); });
+    });
 
     function importBackup(file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const parsed = JSON.parse(e.target.result);
           const data = parsed && parsed.state ? parsed.state : parsed;
@@ -964,7 +1379,14 @@
           if (!confirm("Restaurar o backup? O conteúdo atual deste navegador será substituído.")) return;
           data.notebooks.forEach((n) => {
             if (!Array.isArray(n.pages)) n.pages = [defaultPage()];
-            n.pages = n.pages.map((p) => ({ text: p.text || "", attachment: p.attachment || null, drawing: p.drawing || null }));
+            n.pages = n.pages.map((p) => {
+              const np = { text: p.text || "", drawing: p.drawing || null, attachments: (Array.isArray(p.attachments) ? p.attachments : []).map((a) => Object.assign({}, a)) };
+              if (p.attachment && !np.attachments.length) {
+                np.attachments = [Object.assign({}, p.attachment)];
+              }
+              if (!np.attachments.length) delete np.attachments;
+              return np;
+            });
           });
           state.notebooks = data.notebooks;
           state.activeNotebookId = data.activeNotebookId && state.notebooks.some((n) => n.id === data.activeNotebookId)
@@ -976,13 +1398,16 @@
             state.bible = Object.assign({ version: "almeida-livre", hebrew: false, book: "Gen", chapter: 1, saved: {}, fontScale: 16 }, data.bible);
             if (!state.bible.saved) state.bible.saved = {};
           }
+          const embedded = await persistImportedAttachments();
           currentPdfDoc = null;
+          _currentAtt = null;
+          _attCache = null;
           saveState();
           renderUI();
           applyLayout();
           applyTab();
           renderNotebookList();
-          alert("Backup restaurado com sucesso.");
+          alert("Backup restaurado com sucesso." + (embedded ? "" : " (anexos mantidos em formato antigo, 1 por página.)"));
         } catch (err) {
           alert("Não foi possível restaurar o backup: arquivo JSON inválido.");
         }
@@ -1030,7 +1455,10 @@
               state.activeNotebookId = state.notebooks[0].id;
               state.activePageIndex = 0;
               currentPdfDoc = null;
+              _currentAtt = null;
+              _attCache = null;
             }
+            if (attachmentsAvailable()) attachmentsStore.removeNotebook(nb.id).catch(function () {});
             saveState();
             renderNotebookList();
             renderUI();
@@ -1355,7 +1783,7 @@
        Redimensionar overlay
        ========================================================= */
     function onViewerResize() {
-      const att = page().attachment;
+      const att = _currentAtt || page().attachment;
       if (!att) return;
       if (att.type === "pdf" && currentPdfDoc) {
         drawPdfPage(currentPdfDoc, att.currentPdfPage || 1);
@@ -1769,15 +2197,18 @@
     /* =========================================================
        Bootstrap
        ========================================================= */
-    loadState();
-    const footerYear = $("footerYear");
-    if (footerYear) footerYear.textContent = new Date().getFullYear();
-    // configurar controles da Bíblia com o estado carregado
-    $("bibleVersion").value = state.bible.version;
-    $("chkHebrew").checked = state.bible.hebrew;
-    renderUI();
-    applyLayout();
-    applyTab();
+    (async () => {
+      loadState();
+      await migrateLegacyAttachments();
+      const footerYear = $("footerYear");
+      if (footerYear) footerYear.textContent = new Date().getFullYear();
+      // configurar controles da Bíblia com o estado carregado
+      $("bibleVersion").value = state.bible.version;
+      $("chkHebrew").checked = state.bible.hebrew;
+      renderUI();
+      applyLayout();
+      applyTab();
+    })();
 
     /* =========================================================
        PWA: registrar service worker (permitido pela CSP: script-src 'self')

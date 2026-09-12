@@ -286,6 +286,9 @@
           <button id="btnDelAttachment" class="text-xs px-2 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition">🗑 Remover anexo</button>
         </div>
 
+        <!-- Lista de anexos da página (vários por página) -->
+        <div id="attachmentChips" class="hidden shrink-0 px-3 py-1.5 bg-white border-b border-gray-200 flex items-center gap-1.5 flex-wrap"></div>
+
         <!-- Area de midia + tela de desenho -->
         <div id="viewer" class="flex-1 relative overflow-auto bg-[repeating-conic-gradient(#e5e5e5_0%_25%,#ffffff_0%_50%)] bg-[size:16px_16px]">
           <canvas id="pdfLayer" class="absolute inset-0 m-auto max-w-full max-h-full canvas-hidden"></canvas>

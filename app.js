@@ -1202,6 +1202,7 @@
       if (e.key === "Escape") {
         clearImgSelection();
         closePremiumModal();
+        closePasswordModal();
         closeDrawer();
       }
     });
@@ -1886,6 +1887,28 @@
       refreshPremiumStatus();
     }
 
+    // Login/re-registro reutilizável (fluxo do botão "Entrar" e pós-troca de senha).
+    async function loginWithEmail(email, password) {
+      const mailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+      if (!mailOk) { alert("E-mail inválido."); return false; }
+      let r = await api("/auth/login", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+      if (r.status !== 200) {
+        const motivo = (r.body && r.body.detail) ? r.body.detail : "erro";
+        const criar = confirm("Login falhou (" + motivo + ").\n\nCriar uma conta nova com este e-mail?");
+        if (!criar) return false;
+        const confirme = prompt("Confirme a senha para criar a conta:");
+        if (confirme !== password) { alert("As senhas não conferem."); return false; }
+        const nome = prompt("Seu nome (aparece no topo da tela):");
+        r = await api("/auth/register", { method: "POST", body: JSON.stringify({ email: email.trim(), password, name: (nome && nome.trim()) || null }) });
+      }
+      if (r.status !== 200 && r.status !== 201) {
+        alert("Não foi possível entrar: " + (r.body && r.body.detail ? r.body.detail : "erro"));
+        return false;
+      }
+      setSession(r.body.email || email.trim(), r.body.name || null);
+      return true;
+    }
+
     // Recupera a sessão no boot: o cookie httpOnly é enviado automaticamente
     // (credentials:"include"); usuários legados resolvem via header.
     async function restoreSession() {
@@ -1916,10 +1939,12 @@
     function renderAccountUi() {
       const btn = $("btnAccount");
       const greeting = $("userGreeting");
+      const btnPw = $("btnChangePassword");
       if (isLoggedIn()) {
         const displayName = session.name || session.email;
         btn.textContent = "👤 Sair (" + displayName + ")";
         btn.title = "Encerrar sessão";
+        if (btnPw) { btnPw.classList.remove("hidden"); btnPw.classList.add("inline-block"); }
         if (greeting) {
           greeting.textContent = "Olá, " + displayName + " 👋";
           greeting.classList.remove("hidden");
@@ -1928,6 +1953,7 @@
       } else {
         btn.textContent = "👤 Entrar";
         btn.title = "Entrar e sincronizar na nuvem";
+        if (btnPw) { btnPw.classList.add("hidden"); btnPw.classList.remove("inline-block"); }
         if (greeting) {
           greeting.textContent = "";
           greeting.classList.add("hidden");
@@ -1948,29 +1974,14 @@
       }
       const email = prompt("E-mail para sua conta na nuvem:");
       if (!email) return;
-      const mailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
-      if (!mailOk) { alert("E-mail inválido."); return; }
       const password = prompt("Senha (mínimo 8 caracteres, com letras e números):");
       if (!password || password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
         alert("Senha deve ter no mínimo 8 caracteres, com letras e números.");
         return;
       }
       try {
-        let r = await api("/auth/login", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
-        if (r.status !== 200) {
-          const motivo = (r.body && r.body.detail) ? r.body.detail : "erro";
-          const criar = confirm("Login falhou (" + motivo + ").\n\nCriar uma conta nova com este e-mail?");
-          if (!criar) return;
-          const confirme = prompt("Confirme a senha para criar a conta:");
-          if (confirme !== password) { alert("As senhas não conferem."); return; }
-          const nome = prompt("Seu nome (aparece no topo da tela):");
-          r = await api("/auth/register", { method: "POST", body: JSON.stringify({ email: email.trim(), password, name: (nome && nome.trim()) || null }) });
-        }
-        if (r.status !== 200 && r.status !== 201) {
-          alert("Não foi possível entrar: " + (r.body && r.body.detail ? r.body.detail : "erro" ));
-          return;
-        }
-        setSession(r.body.email || email.trim(), r.body.name || null);
+        const ok = await loginWithEmail(email, password);
+        if (!ok) return;
         alert("Conta conectada! Suas anotações serão sincronizadas na nuvem.");
         startCloudSync();
       } catch (e) {
@@ -2166,6 +2177,75 @@
     if (_btnClosePremium) _btnClosePremium.addEventListener("click", closePremiumModal);
     const _premiumModal = $("premiumModal");
     if (_premiumModal) _premiumModal.addEventListener("click", (e) => { if (e.target.id === "premiumModal") closePremiumModal(); });
+
+    // ---- Trocar senha (logado) ----
+    function setPasswordStatus(msg, ok) {
+      const st = $("passwordStatus");
+      if (!st) return;
+      st.textContent = msg || "";
+      st.className = "text-xs min-h-[1rem] mb-3 " + (ok ? "text-green-700" : "text-red-600");
+    }
+
+    function openPasswordModal() {
+      if (!isLoggedIn()) { alert("Entre com sua conta primeiro para trocar a senha."); return; }
+      const m = $("passwordModal");
+      const b = $("passwordModalBackdrop");
+      if (m) { m.classList.remove("hidden"); const a = $("pwAtual"); if (a) a.focus(); }
+      if (b) b.classList.remove("hidden");
+      setPasswordStatus("", false);
+    }
+
+    function closePasswordModal() {
+      const m = $("passwordModal");
+      const b = $("passwordModalBackdrop");
+      if (m) m.classList.add("hidden");
+      if (b) b.classList.add("hidden");
+    }
+
+    async function submitPasswordChange() {
+      if (!isLoggedIn()) return;
+      const atual = $("pwAtual") ? $("pwAtual").value : "";
+      const nova = $("pwNova") ? $("pwNova").value : "";
+      const nova2 = $("pwNova2") ? $("pwNova2").value : "";
+      setPasswordStatus("", false);
+      if (!atual || !nova) { setPasswordStatus("Preencha a senha atual e a nova senha.", false); return; }
+      if (nova.length < 8 || !/[A-Za-z]/.test(nova) || !/[0-9]/.test(nova)) {
+        setPasswordStatus("A nova senha deve ter no mínimo 8 caracteres, com letras e números.", false);
+        return;
+      }
+      if (nova !== nova2) { setPasswordStatus("As senhas não conferem.", false); return; }
+      try {
+        const r = await api("/auth/me/password", {
+          method: "PUT",
+          body: JSON.stringify({ senha_atual: atual, nova_senha: nova }),
+        });
+        if (r.status === 200) {
+          closePasswordModal();
+          alert("Senha alterada com sucesso! Fazendo login novamente...");
+          try {
+            const ok = await loginWithEmail(session.email, nova);
+            if (ok) { startCloudSync(); alert("Login renovado com a nova senha."); }
+          } catch (e) {
+            alert("Senha alterada, mas não foi possível refazer o login automaticamente. Faça login novamente.");
+          }
+        } else {
+          setPasswordStatus((r.body && r.body.detail) || "Não foi possível trocar a senha.", false);
+        }
+      } catch (e) {
+        setPasswordStatus("Erro de conexão com o servidor.", false);
+      }
+    }
+
+    const _btnChangePassword = $("btnChangePassword");
+    if (_btnChangePassword) _btnChangePassword.addEventListener("click", openPasswordModal);
+    const _btnConfirmarSenha = $("btnConfirmarSenha");
+    if (_btnConfirmarSenha) _btnConfirmarSenha.addEventListener("click", submitPasswordChange);
+    const _btnCancelPassword = $("btnCancelPassword");
+    if (_btnCancelPassword) _btnCancelPassword.addEventListener("click", closePasswordModal);
+    const _btnClosePassword = $("btnClosePassword");
+    if (_btnClosePassword) _btnClosePassword.addEventListener("click", closePasswordModal);
+    const _passwordModalEl = $("passwordModal");
+    if (_passwordModalEl) _passwordModalEl.addEventListener("click", (e) => { if (e.target.id === "passwordModal") closePasswordModal(); });
 
     function cloudNotebooks() {
       return state.notebooks.map((n) => ({

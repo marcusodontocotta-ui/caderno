@@ -96,6 +96,19 @@
       _attSeq = (_attSeq + 1) % 1000;
       return "att_" + Date.now().toString(36) + "_" + _attSeq + "_" + Math.random().toString(36).slice(2, 8);
     }
+    // Junta anexos ainda embutidos (dataUrl inline em p.attachments, ex.: backup
+    // restaurado sem IndexedDB) na lista do IndexedDB, sem duplicar por id.
+    function mergeInlineInto(items, metas) {
+      const seen = {};
+      items.forEach(function (x) { if (x.id) seen[x.id] = true; });
+      (Array.isArray(metas) ? metas : []).forEach(function (m) {
+        if (m && m.dataUrl && !(m.id && seen[m.id])) {
+          if (!m.id) m.id = genAttId();
+          items.push(Object.assign({ currentPdfPage: 1, pageCount: 1 }, m));
+        }
+      });
+      return items;
+    }
 
     function attachmentsAvailable() {
       return typeof indexedDB !== "undefined" && !_attDbUnavailable;
@@ -215,32 +228,52 @@
       for (const nb of state.notebooks) {
         for (let i = 0; i < nb.pages.length; i++) {
           const p = nb.pages[i];
-          if (!p || !p.attachment) continue;
-          if (Array.isArray(p.attachments) && p.attachments.length) {
-            delete p.attachment;
+          if (!p) continue;
+          if (p.attachment) {
+            if (Array.isArray(p.attachments) && p.attachments.length) {
+              delete p.attachment;
+              continue;
+            }
+            const old = p.attachment;
+            const id = genAttId();
+            try {
+              const items = await attachmentsStore.get(nb.id, i);
+              items.push({
+                id: id,
+                type: old.type,
+                name: old.name || "anexo",
+                dataUrl: old.dataUrl,
+                pageCount: old.pageCount || 1,
+                currentPdfPage: (typeof old.currentPdfPage === "number") ? old.currentPdfPage : 1,
+              });
+              await attachmentsStore.put(nb.id, i, items);
+              p.attachments = items.map(function (x) {
+                return { id: x.id, type: x.type, name: x.name, pageCount: x.pageCount || 1 };
+              });
+              if (!p.activeAttachmentId) p.activeAttachmentId = id;
+              delete p.attachment;
+              migrated++;
+            } catch (e) {
+              // IndexedDB falhou: mantém o formato antigo (fallback 1 anexo)
+            }
             continue;
           }
-          const old = p.attachment;
-          const id = genAttId();
+          // Passa 2: anexos embutidos (dataUrl) que ficaram em p.attachments
+          // (ex.: backup restaurado sem IndexedDB) são gravados no IndexedDB,
+          // evitando que se percam ao adicionar/remover anexos depois.
+          if (!Array.isArray(p.attachments) || !p.attachments.length) continue;
+          if (!p.attachments.some(function (m) { return m && m.dataUrl; })) continue;
           try {
-            const items = await attachmentsStore.get(nb.id, i);
-            items.push({
-              id: id,
-              type: old.type,
-              name: old.name || "anexo",
-              dataUrl: old.dataUrl,
-              pageCount: old.pageCount || 1,
-              currentPdfPage: (typeof old.currentPdfPage === "number") ? old.currentPdfPage : 1,
-            });
+            const items = (await attachmentsStore.get(nb.id, i)) || [];
+            mergeInlineInto(items, p.attachments);
             await attachmentsStore.put(nb.id, i, items);
             p.attachments = items.map(function (x) {
               return { id: x.id, type: x.type, name: x.name, pageCount: x.pageCount || 1 };
             });
-            if (!p.activeAttachmentId) p.activeAttachmentId = id;
-            delete p.attachment;
+            if (!p.activeAttachmentId && p.attachments.length) p.activeAttachmentId = p.attachments[0].id;
             migrated++;
           } catch (e) {
-            // IndexedDB falhou: mantém o formato antigo (fallback 1 anexo)
+            // Sem IndexedDB: mantém inline (funciona, mas segue ocupando localStorage)
           }
         }
       }
@@ -270,23 +303,24 @@
       if (p.attachment) { _currentAtt = p.attachment; return _currentAtt; }
       const meta = activeAttachmentMeta();
       if (!meta) { _currentAtt = null; return null; }
-      if (meta.dataUrl) { _currentAtt = meta; return meta; } // embutido (ex.: import sem IndexedDB)
+      if (meta.dataUrl && !attachmentsAvailable()) { _currentAtt = meta; return meta; }
       try {
         if (!_attCache || _attCache.pageKey !== attPageKey()) {
           _attCache = { pageKey: attPageKey(), items: (await attachmentsStore.get(notebook().id, state.activePageIndex)) || [] };
         }
         const it = _attCache.items.find(function (x) { return x.id === meta.id; }) || null;
-        _currentAtt = it;
-        return it;
+        // Sem item no IndexedDB mas com dataUrl inline: usa o embutido (ex.: import sem IDB)
+        _currentAtt = it || meta;
+        return _currentAtt;
       } catch (e) {
-        _currentAtt = null;
+        _currentAtt = (meta && meta.dataUrl) ? meta : null;
         _attCache = null;
-        return null;
+        return _currentAtt;
       }
     }
 
     function persistCurrentAtt() {
-      if (!_attCache || !_currentAtt) return;
+      if (!_attCache || !_currentAtt || _attCache.pageKey !== attPageKey()) return;
       attachmentsStore.put(notebook().id, state.activePageIndex, _attCache.items).catch(function () {});
     }
 
@@ -308,6 +342,7 @@
         if (!_attCache || _attCache.pageKey !== attPageKey()) {
           _attCache = { pageKey: attPageKey(), items: (await attachmentsStore.get(notebook().id, state.activePageIndex)) || [] };
         }
+        mergeInlineInto(_attCache.items, page().attachments);
         _attCache.items.push(full);
         await attachmentsStore.put(notebook().id, state.activePageIndex, _attCache.items);
         page().attachments = _attCache.items.map(function (x) {
@@ -355,11 +390,15 @@
           const p = nb.pages[i];
           if (!p || !Array.isArray(p.attachments) || !p.attachments.length) continue;
           const items = p.attachments.map((a) => Object.assign({}, a));
+          items.forEach(function (x) { if (!x.id) x.id = genAttId(); });
           try {
             await attachmentsStore.put(nb.id, i, items);
             p.attachments = items.map(function (x) {
               return { id: x.id, type: x.type, name: x.name, pageCount: x.pageCount || 1 };
             });
+            if (!p.activeAttachmentId || !p.attachments.some(function (x) { return x.id === p.activeAttachmentId; })) {
+              p.activeAttachmentId = p.attachments.length ? p.attachments[0].id : null;
+            }
           } catch (e) {
             allOk = false;
           }
@@ -765,24 +804,38 @@
     /* =========================================================
        Anexos
        ========================================================= */
+    function readFileAsDataURL(file) {
+      return new Promise(function (resolve, reject) {
+        const reader = new FileReader();
+        reader.onload = function () { resolve(reader.result); };
+        reader.onerror = function () { reject(reader.error || new Error("Falha ao ler o arquivo")); };
+        reader.readAsDataURL(file);
+      });
+    }
+
     fileInput.addEventListener("change", () => {
-      const f = fileInput.files[0];
-      if (!f) return;
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
-        await addAttachment({
-          type: isPdf ? "pdf" : "image",
-          dataUrl: e.target.result,
-          name: f.name,
-          currentPdfPage: 1,
-          pageCount: 1,
-        });
+      const files = Array.prototype.slice.call(fileInput.files || []);
+      if (!files.length) return;
+      (async () => {
+        for (const f of files) {
+          try {
+            const dataUrl = await readFileAsDataURL(f);
+            const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+            await addAttachment({
+              type: isPdf ? "pdf" : "image",
+              dataUrl: dataUrl,
+              name: f.name,
+              currentPdfPage: 1,
+              pageCount: 1,
+            });
+          } catch (err) {
+            console.warn("Falha ao anexar", f.name, err);
+          }
+        }
+        fileInput.value = "";
         saveState();
         renderUI();
-      };
-      reader.readAsDataURL(f);
-      fileInput.value = "";
+      })();
     });
 
     $("btnDelAttachment").addEventListener("click", async () => {
